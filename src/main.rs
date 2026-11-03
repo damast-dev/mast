@@ -36,6 +36,7 @@ pub const USER_AGENT: &str = concat!(
 );
 
 #[derive(Parser, Debug)]
+#[command(name = "mast")] // DAMAST: binary name
 #[clap(disable_help_subcommand = true)]
 pub struct App {
     #[clap(long, short = 'H', global = true)]
