@@ -1,0 +1,9 @@
+when:
+  - event: manual
+  - event: pull_request
+steps:
+  check:
+    image: rust
+    commands:
+      - rustup component add clippy
+      - cargo clippy

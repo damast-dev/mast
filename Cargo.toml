@@ -1,0 +1,86 @@
+[package]
+name = "forgejo-cli"
+version = "0.7.0"
+edition = "2024"
+license = "Apache-2.0 OR MIT"
+repository = "https://codeberg.org/forgejo-contrib/forgejo-cli/"
+description = "CLI tool for Forgejo"
+keywords = ["cli", "forgejo"]
+categories = ["command-line-utilities", "development-tools"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target-arch }-{ target-family }{ archive-suffix }"
+bin-dir = "{ bin }{ binary-ext }"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
+
+[[bin]]
+name = "fj"
+path = "src/main.rs"
+
+[features]
+default = ["locale.de-DE", "locale.zh-Hans"]
+update-check = ["dep:semver"]
+"locale.de-DE" = []
+"locale.fi" = []
+"locale.fr" = []
+"locale.it" = []
+"locale.pl" = []
+"locale.ru" = []
+"locale.tok" = []
+"locale.zh-Hans" = []
+unstable-sha256 = []
+
+[dependencies]
+auth-git2 = "0.6.0"
+base64ct = { version = "1.7.3", features = ["std"] }
+clap = { version = "4.5.34", features = ["derive"] }
+clap_complete = "4.5.47"
+comrak = { version = "0.56.0", default-features = false }
+directories = "6.0.0"
+eyre = "0.6.12"
+fluent-bundle = "0.16.0"
+fluent-datetime = "0.2.0"
+fluent-syntax = "0.12.0"
+forgejo-api = "0.12.0"
+futures = "0.3.31"
+git2 = { version = "0.21.0", features = ["https", "ssh"] }
+hyper = "1.6.0"
+hyper-util = { version = "0.1.11", features = ["tokio", "server", "http1", "http2"] }
+icu_calendar = "2.2.1"
+icu_time = "2.2.0"
+open = "5.3.2"
+rand = "0.10.0"
+regex = "1.12.2"
+semver = { version = "1.0.26", optional = true }
+serde = { version = "1.0.219", features = ["derive"] }
+serde-saphyr = "2.0.0"
+serde_json = "1.0.140"
+sha2 = "0.11.0"
+shlex = "2.0.0"
+ssh2-config = "0.8.0"
+terminal_size = "0.4.4"
+time = { version = "0.3.41", features = ["formatting", "local-offset", "macros"] }
+tokio = { version = "1.44.1", features = [
+  "rt-multi-thread",
+  "macros",
+  "fs",
+  "process",
+  "io-std",
+] }
+unic-langid = { version = "0.9.6", features = ["unic-langid-macros"] }
+url = "2.5.4"
+uuid = { version = "1.16.0", features = ["v4"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[build-dependencies]
+fluent-syntax = "0.12.0"
+
+[profile.release]
+lto = true
+codegen-units = 1

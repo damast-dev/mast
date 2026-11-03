@@ -1,0 +1,5 @@
+[files]
+extend-exclude = [
+  "localization/*",
+  "!localization/en-US"
+]

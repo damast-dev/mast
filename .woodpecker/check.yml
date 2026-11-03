@@ -1,0 +1,25 @@
+when:
+  - event: manual
+  - event: pull_request
+steps:
+  check:
+    image: rust
+    environment:
+      CARGO_HOME: './cargo-home'
+    commands:
+      - cargo check
+  check-fmt:
+    image: rust
+    environment:
+      CARGO_HOME: './cargo-home'
+    commands:
+      - rustup component add rustfmt
+      - cargo fmt --check
+  check-clap:
+    image: rust
+    environment:
+      CARGO_HOME: './cargo-home'
+    commands:
+      # Generating completions involves parsing every command.
+      # If any of them are wrong, it will panic here.
+      - cargo run -- completion bash

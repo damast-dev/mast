@@ -1,0 +1,10 @@
+when:
+  - event: manual
+  - event: pull_request
+steps:
+  check-typos:
+    # This image was built from the `Dockerfile` that `typos` already has, but
+    # it isn't published anywhere. So I built & uploaded it to Codeberg myself.
+    image: codeberg.org/cyborus/typos:latest
+    commands:
+      - typos
