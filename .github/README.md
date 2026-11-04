@@ -11,7 +11,19 @@ On GitHub, `gh` is half the workflow. You open pull requests from the terminal, 
 
 `fj` already does a lot of this for Forgejo, and does it well. mast starts from `fj` and adds what Damast adds to Forgejo, so the command line knows about the same things the web UI does.
 
-**Right now, mast is `fj` with a new name.** That is on purpose: it gives the fork a clean starting point that tracks `fj` from day one. Damast commands come next, starting with repo-bound packages.
+mast started as `fj` with a new name, so the fork tracks `fj` from day one. Damast commands land on top, one feature at a time: [draft pull requests](#draft-pull-requests) first, repo-bound packages next.
+
+## What mast adds
+
+### Draft pull requests
+
+```sh
+mast pr create --draft "Rework the login page"   # opens it as a draft
+mast pr ready                                     # the PR for the current branch is ready for review
+mast pr draft 42                                  # back to draft
+```
+
+A draft is a pull request whose title starts with `WIP:`, which is how both Damast and Forgejo store drafts. So these commands work against plain Forgejo too, and `fj` users see the same drafts. On Damast, marking a draft ready also asks the code owners for review.
 
 ## Drop-in, like Damast
 
