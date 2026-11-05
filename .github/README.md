@@ -21,13 +21,44 @@ On GitHub, `gh` is half the workflow. You open pull requests from the terminal, 
 
 ## Install
 
-From source, until the first release:
+Every release ships ready-made packages, so you don't need a Rust toolchain. mast installs as `mast` and never touches `fj`, so you can keep both.
+
+**macOS and Linux, with Homebrew:**
 
 ```sh
-cargo install --git https://github.com/damast-dev/mast
+brew install damast-dev/tap/mast
+```
+
+**Ubuntu and Debian (amd64, arm64):** a signed apt repository. The binary is static, so it works on any release.
+
+```sh
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://damast-dev.github.io/apt/mast-archive-keyring.gpg | sudo tee /etc/apt/keyrings/mast-archive-keyring.gpg >/dev/null
+echo "deb [signed-by=/etc/apt/keyrings/mast-archive-keyring.gpg] https://damast-dev.github.io/apt stable main" | sudo tee /etc/apt/sources.list.d/mast.list
+sudo apt update && sudo apt install mast
+```
+
+**Direct download:** each [release](https://github.com/damast-dev/mast/releases) has static Linux binaries (x86_64, aarch64), macOS binaries (Apple silicon, Intel), `.deb` files and `SHA256SUMS`:
+
+```sh
+curl -fsSLO https://github.com/damast-dev/mast/releases/download/v0.7.0-mast.1/mast-0.7.0-mast.1-x86_64-unknown-linux-musl.tar.gz
+tar -xzf mast-*.tar.gz mast && sudo install mast /usr/local/bin/
+```
+
+**From source** (recent stable Rust):
+
+```sh
+cargo install --locked --git https://github.com/damast-dev/mast
+```
+
+Then:
+
+```sh
 mast auth login
 mast whoami
 ```
+
+Releases are tagged `vX.Y.Z-mast.N` (fj version plus mast's release number). [`release.yml`](workflows/release.yml) builds and tests every package before it is published.
 
 ## Is mast for you?
 

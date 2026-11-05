@@ -1,0 +1,226 @@
+# Builds and publishes a release for every mast tag (vX.Y.Z-mast.N, RCs: vX.Y.Z-mast.N-rc.M):
+# binaries for Linux (static musl) and macOS, .debs, a GitHub release, the Homebrew formula in
+# damast-dev/homebrew-tap and the apt repository in damast-dev/apt (both only for final releases).
+# Tags come from tag-rc.yml and promote.yml; they push with SYNC_TOKEN so this workflow runs.
+#
+# Dry run: pull requests that touch the release files and manual runs (workflow_dispatch) build and test
+# everything — install the .deb, install from a freshly signed apt repo, brew install the formula — and
+# upload it all as workflow artifacts, but publish nothing.
+name: release
+
+on:
+  push:
+    tags: ['v*-mast.*']
+  pull_request:
+    paths: [.github/workflows/release.yml, .github/scripts/**, Cargo.toml, Cargo.lock, build.rs]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      release: ${{ steps.v.outputs.release }}
+      stable: ${{ steps.v.outputs.stable }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: v
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          base=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          if [[ $EVENT == push ]]; then
+            tag=$GITHUB_REF_NAME
+            [[ $tag =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-mast\.[0-9]+(-rc\.[0-9]+)?$ ]] || { echo "::error::not a mast tag: $tag"; exit 1; }
+            [[ ${BASH_REMATCH[1]} == "$base" ]] || { echo "::error::$tag does not match Cargo.toml version $base"; exit 1; }
+            version=${tag#v}; release=true
+            [[ -z ${BASH_REMATCH[2]} ]] && stable=true || stable=false
+          else
+            version=$base-mast.0; release=false; stable=false # dry run
+          fi
+          { echo "version=$version"; echo "release=$release"; echo "stable=$stable"; } | tee -a "$GITHUB_OUTPUT"
+
+  build:
+    needs: meta
+    strategy:
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-musl, runner: ubuntu-latest }
+          - { target: aarch64-unknown-linux-musl, runner: ubuntu-24.04-arm }
+          - { target: aarch64-apple-darwin, runner: macos-15 }
+          - { target: x86_64-apple-darwin, runner: macos-15-intel }
+    runs-on: ${{ matrix.runner }}
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+      BIN: target/${{ matrix.target }}/release/mast
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build (Linux, static musl + .deb)
+        if: runner.os == 'Linux'
+        run: mkdir -p dist && docker run --rm -v "$PWD:/src" -w /src -e VERSION rust:1-alpine .github/scripts/build-linux.sh
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          rustup toolchain install stable --profile minimal && rustup default stable
+          # Link OpenSSL (needed by libssh2) statically so the binary runs without Homebrew's openssl.
+          CARGO_PROFILE_RELEASE_STRIP=true OPENSSL_DIR=$(brew --prefix openssl@3) OPENSSL_STATIC=1 BUILD_TYPE="mast v$VERSION release" \
+            cargo build --locked --release --target ${{ matrix.target }}
+          if otool -L "$BIN" | grep -E '/(opt/homebrew|usr/local)/'; then echo "::error::links Homebrew libraries"; exit 1; fi
+      - name: Check binary
+        run: |
+          file "$BIN"
+          "$BIN" --version | tee /dev/stderr | grep -qx "mast ${VERSION%%-mast*}"
+          "$BIN" version --verbose
+      - name: Install the .deb on Ubuntu 24.04
+        if: runner.os == 'Linux'
+        run: docker run --rm -v "$PWD/dist:/dist:ro" ubuntu:24.04 sh -c 'dpkg -i /dist/*.deb && mast --version'
+      - name: Package
+        run: |
+          mkdir -p dist
+          tar -czf "dist/mast-$VERSION-${{ matrix.target }}.tar.gz" -C "$(dirname "$BIN")" mast -C "$PWD" LICENSE-APACHE LICENSE-MIT
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mast-${{ matrix.target }}
+          path: dist/*
+
+  release:
+    needs: [meta, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          pattern: mast-*
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum -- mast* | tee SHA256SUMS
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mast-sha256sums
+          path: dist/SHA256SUMS
+      - name: Create GitHub release
+        if: needs.meta.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          flags=(--generate-notes --verify-tag --title "mast $VERSION")
+          if [[ ${{ needs.meta.outputs.stable }} == true ]]; then flags+=(--latest); else flags+=(--prerelease); fi
+          cat > notes.md <<NOTES
+          Built on forgejo-cli (fj) ${VERSION%%-mast*}. Same commands, same config: mast and fj share their logins.
+
+          Install: \`brew install damast-dev/tap/mast\`, \`sudo apt install mast\` from https://damast-dev.github.io/apt, or download a binary below (check it against \`SHA256SUMS\`).
+          NOTES
+          gh release create "$GITHUB_REF_NAME" "${flags[@]}" --notes-file notes.md dist/*
+
+  homebrew:
+    needs: [meta, release]
+    runs-on: macos-15
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_FROM_API: 1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          pattern: mast-*
+          merge-multiple: true
+      - name: Generate and check the formula
+        run: |
+          .github/scripts/formula.sh "$VERSION" dist/SHA256SUMS > mast.rb
+          brew tap-new --no-git damast-dev/check
+          formula=$(brew --repo damast-dev/check)/Formula/mast.rb
+          cp mast.rb "$formula"
+          brew style damast-dev/check/mast
+          brew audit --strict damast-dev/check/mast
+          # Not released yet: install the same formula from the local build instead.
+          [[ ${{ needs.meta.outputs.release }} == true ]] || .github/scripts/formula.sh "$VERSION" dist/SHA256SUMS "file://$PWD/dist" > "$formula"
+          brew install damast-dev/check/mast
+          brew test damast-dev/check/mast
+          mast --version
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: homebrew-formula
+          path: mast.rb
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.meta.outputs.stable == 'true'
+        with:
+          repository: damast-dev/homebrew-tap
+          path: homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      - name: Publish to damast-dev/homebrew-tap
+        if: needs.meta.outputs.stable == 'true'
+        working-directory: homebrew-tap
+        run: |
+          cp ../mast.rb Formula/mast.rb
+          git config user.name "mast-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/mast.rb
+          git diff --cached --quiet || git commit -m "mast $VERSION"
+          git push
+
+  apt:
+    needs: [meta, release]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          pattern: mast-*-linux-musl
+          merge-multiple: true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.meta.outputs.stable == 'true'
+        with:
+          repository: damast-dev/apt
+          ref: gh-pages
+          path: apt-repo
+          token: ${{ secrets.APT_REPO_TOKEN }}
+      - name: Set up
+        run: |
+          sudo apt-get install -y --no-install-recommends apt-utils
+          echo "GNUPGHOME=$(mktemp -d)" >> "$GITHUB_ENV" # keyring only for this job
+      - name: Build the apt repository
+        env:
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+          APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
+        run: |
+          if [[ ${{ needs.meta.outputs.stable }} == true ]]; then
+            printf '%s\n' "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+          else
+            # Dry run: fresh repo, throwaway key.
+            APT_GPG_PASSPHRASE=
+            gpg --batch --passphrase '' --quick-gen-key "mast dry run <dry-run@invalid>" ed25519 sign never
+          fi
+          APT_GPG_PASSPHRASE=$APT_GPG_PASSPHRASE .github/scripts/apt-repo.sh apt-repo dist/*.deb
+      - name: Install from the repository on Ubuntu 24.04
+        run: |
+          docker run --rm -v "$PWD/apt-repo:/repo:ro" -e V="${VERSION/-rc./\~rc.}" ubuntu:24.04 sh -ec '
+            echo "deb [signed-by=/repo/mast-archive-keyring.gpg] file:/repo stable main" > /etc/apt/sources.list.d/mast.list
+            apt-get update && apt-cache policy mast && apt-get install -y "mast=$V" && mast --version'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: needs.meta.outputs.stable != 'true'
+        with:
+          name: apt-repo
+          path: apt-repo
+          include-hidden-files: true
+      - name: Publish to damast-dev/apt (GitHub Pages)
+        if: needs.meta.outputs.stable == 'true'
+        working-directory: apt-repo
+        run: |
+          git config user.name "mast-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "mast $VERSION"
+          git push

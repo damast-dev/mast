@@ -84,3 +84,17 @@ fluent-syntax = "0.12.0"
 [profile.release]
 lto = true
 codegen-units = 1
+
+# DAMAST: Debian package, built by .github/workflows/release.yml (cargo deb)
+[package.metadata.deb]
+name = "mast"
+maintainer = "Damast <damast-dev@users.noreply.github.com>"
+copyright = "forgejo-cli and mast contributors"
+extended-description = "mast is the command line for Damast, a soft fork of forgejo-cli (fj). Same commands and config as fj."
+section = "vcs"
+depends = "" # static musl binary
+assets = [
+  ["target/release/mast", "usr/bin/", "755"],
+  ["LICENSE-APACHE", "usr/share/doc/mast/", "644"],
+  ["LICENSE-MIT", "usr/share/doc/mast/", "644"],
+]
