@@ -559,7 +559,10 @@ impl<'a> Client<'a> {
         let (_, v) = self.send(Method::GET, "", None).await?;
         let stack: Stack = serde_json::from_value(v)?;
         if stack.layers.len() < 2 {
-            bail!("#{} is not part of a stack", stack.current);
+            bail!(
+                "#{} is not part of a stack; use `mast pr merge` for a single pull request",
+                stack.current
+            );
         }
         body["heads"] = json!(heads(&stack));
         let (_, v) = self.send(Method::POST, suffix, Some(&body)).await?;
