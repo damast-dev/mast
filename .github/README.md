@@ -20,6 +20,7 @@ On GitHub, `gh` is half the workflow. You open pull requests from the terminal, 
 ```sh
 mast security policy                                    # the repository's SECURITY.md
 mast security report -t "SQL injection in search" -b -  # report a vulnerability privately (body from stdin)
+mast security reporting on                              # admins: accept private reports (off, or no argument to check)
 mast advisory list                                      # advisories you may see; --state draft, --json
 mast advisory view DAMAST-58rf-qmv9-p456                # one advisory; --osv for OSV JSON
 mast advisory create -t "XSS in comments" -b "..." --cvss CVSS:3.1/... --cwe CWE-79 \

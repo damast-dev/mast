@@ -24,6 +24,12 @@ const POLICY_PATHS: [&str; 5] = [
     "docs/SECURITY.md",
 ];
 
+/// Page size for listing; Damast caps it at its API.MAX_RESPONSE_ITEMS (50 by default).
+const PER_PAGE: usize = 50;
+
+/// Pseudo suffix for `/repos/{owner}/{repo}/private-vulnerability-reporting`, which is not below the advisories route.
+const REPORTING: &str = "@reporting";
+
 const NOT_DAMAST: &str = "this server has no security advisories: it runs plain Forgejo, and `mast security` / `mast advisory` need Damast (https://damast.dev)";
 
 #[derive(Args, Clone, Debug)]
@@ -53,6 +59,17 @@ pub enum SecuritySubcommand {
         #[clap(flatten)]
         content: Box<Content>,
     },
+    /// Show whether private vulnerability reporting is on, or turn it on or off (repository admins)
+    Reporting {
+        #[clap(value_enum)]
+        set: Option<OnOff>,
+    },
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OnOff {
+    On,
+    Off,
 }
 
 #[derive(Args, Clone, Debug)]
@@ -226,13 +243,8 @@ impl Client {
         })
     }
 
-    /// `suffix` is a path below the advisories route, optionally with a query.
     fn url(&self, suffix: &str) -> Url {
-        let (path, query) = suffix.split_once('?').unwrap_or((suffix, ""));
-        let mut url = self.base.clone();
-        url.set_path(&format!("{}{path}", self.base.path()));
-        url.set_query(Some(query).filter(|q| !q.is_empty()));
-        url
+        endpoint(&self.base, suffix)
     }
 
     fn repo_name(&self) -> String {
@@ -245,6 +257,33 @@ impl Client {
         suffix: &str,
         body: Option<&Value>,
     ) -> eyre::Result<Value> {
+        Ok(self.send_paged(method, suffix, body).await?.0)
+    }
+
+    /// Fetches every page of a list (`query` without `page`/`per_page`).
+    async fn get_all(&self, path: &str, query: &str) -> eyre::Result<Value> {
+        let mut all = Vec::new();
+        for page in 1.. {
+            let sep = if query.is_empty() { "" } else { "&" };
+            let suffix = format!("{path}?{query}{sep}page={page}&per_page={PER_PAGE}");
+            let (v, total) = self.send_paged(Method::GET, &suffix, None).await?;
+            let items = v.as_array().cloned().unwrap_or_default();
+            let short = items.is_empty();
+            all.extend(items);
+            if !more_pages(all.len(), total, short) {
+                break;
+            }
+        }
+        Ok(Value::Array(all))
+    }
+
+    /// `send`, plus the X-Total-Count header of lists.
+    async fn send_paged(
+        &self,
+        method: Method,
+        suffix: &str,
+        body: Option<&Value>,
+    ) -> eyre::Result<(Value, Option<usize>)> {
         let mut req = self.http.request(method, self.url(suffix));
         if let Some(token) = &self.token {
             req = req.header("Authorization", format!("token {token}"));
@@ -256,12 +295,16 @@ impl Client {
         }
         let resp = req.send().await?;
         let status = resp.status();
+        let total = resp
+            .headers()
+            .get("X-Total-Count")
+            .and_then(|v| v.to_str().ok()?.parse().ok());
         let bytes = resp.bytes().await?;
         if status.is_success() {
             if bytes.is_empty() {
-                return Ok(Value::Null); // 204 No Content
+                return Ok((Value::Null, total)); // 204 No Content
             }
-            return Ok(serde_json::from_slice(&bytes)?);
+            return Ok((serde_json::from_slice(&bytes)?, total));
         }
         let message = serde_json::from_slice::<Value>(&bytes)
             .ok()
@@ -282,7 +325,9 @@ impl Client {
             }
             matches!(req.send().await, Ok(r) if r.status() != StatusCode::NOT_FOUND)
         };
-        if has_route && path.starts_with("/reports") {
+        if has_route && path == REPORTING {
+            "only repository admins can see or change private vulnerability reporting".to_owned()
+        } else if has_route && path.starts_with("/reports") {
             "private vulnerability reporting is off for this repository, or you can't report here"
                 .to_owned()
         } else if has_route && path.contains("/comments/") {
@@ -300,6 +345,28 @@ impl Client {
             format!("repository {} not found", self.repo_name())
         }
     }
+}
+
+/// `suffix` is a path below the advisories route `base`, optionally with a query, or [`REPORTING`].
+fn endpoint(base: &Url, suffix: &str) -> Url {
+    let (path, query) = suffix.split_once('?').unwrap_or((suffix, ""));
+    let mut url = base.clone();
+    let base = base.path();
+    let full = match path {
+        REPORTING => format!(
+            "{}/private-vulnerability-reporting",
+            base.strip_suffix("/security-advisories").unwrap_or(base)
+        ),
+        _ => format!("{base}{path}"),
+    };
+    url.set_path(&full);
+    url.set_query(Some(query).filter(|q| !q.is_empty()));
+    url
+}
+
+/// Whether to fetch the next page. A server without X-Total-Count does not paginate, so its one answer is all.
+fn more_pages(collected: usize, total: Option<usize>, empty_page: bool) -> bool {
+    matches!(total, Some(t) if collected < t && !empty_page)
 }
 
 fn error_for(status: StatusCode, message: Option<String>) -> eyre::Report {
@@ -353,6 +420,21 @@ impl SecurityCommand {
                 println!("{}", str_of(&a, "html_url"));
                 Ok(())
             }
+            SecuritySubcommand::Reporting { set } => {
+                match set {
+                    Some(OnOff::On) => client.send(Method::PUT, REPORTING, None).await?,
+                    Some(OnOff::Off) => client.send(Method::DELETE, REPORTING, None).await?,
+                    None => Value::Null,
+                };
+                let v = client.send(Method::GET, REPORTING, None).await?;
+                let on = v["enabled"].as_bool().unwrap_or(false);
+                println!(
+                    "Private vulnerability reporting is {} for {}",
+                    if on { "on" } else { "off" },
+                    client.repo_name()
+                );
+                Ok(())
+            }
         }
     }
 }
@@ -400,12 +482,12 @@ impl AdvisoryCommand {
                 let query = state
                     .map(|s| {
                         format!(
-                            "?state={}",
+                            "state={}",
                             url::form_urlencoded::byte_serialize(s.as_bytes()).collect::<String>()
                         )
                     })
                     .unwrap_or_default();
-                let list = client.send(Method::GET, &query, None).await?;
+                let list = client.get_all("", &query).await?;
                 if json {
                     return print_json(&list);
                 }
@@ -443,7 +525,7 @@ impl AdvisoryCommand {
             AdvisorySubcommand::Withdraw { id } => set_state(&client, &id, "withdrawn").await,
             AdvisorySubcommand::Comments { id, json } => {
                 let list = client
-                    .send(Method::GET, &format!("{}/comments", id_path(&id)), None)
+                    .get_all(&format!("{}/comments", id_path(&id)), "")
                     .await?;
                 if json {
                     return print_json(&list);
@@ -617,6 +699,26 @@ mod tests {
     }
 
     #[test]
+    fn endpoints_and_pages() {
+        let base = Url::parse(
+            "https://git.example.com/api/v1/repos/o/security-advisories/security-advisories",
+        )
+        .unwrap();
+        assert_eq!(
+            endpoint(&base, REPORTING).as_str(),
+            "https://git.example.com/api/v1/repos/o/security-advisories/private-vulnerability-reporting"
+        );
+        assert_eq!(
+            endpoint(&base, "/DAMAST-1/comments?page=2&per_page=50").as_str(),
+            "https://git.example.com/api/v1/repos/o/security-advisories/security-advisories/DAMAST-1/comments?page=2&per_page=50"
+        );
+        assert!(more_pages(50, Some(51), false));
+        assert!(!more_pages(51, Some(51), false));
+        assert!(!more_pages(50, Some(60), true), "stops on an empty page");
+        assert!(!more_pages(70, None, false), "no header: not paginated");
+    }
+
+    #[test]
     fn errors() {
         let e = error_for(StatusCode::TOO_MANY_REQUESTS, Some("too many".into()));
         assert!(e.to_string().contains("report limit"));
@@ -637,6 +739,10 @@ mod tests {
                 .unwrap()
         };
         ok(&["mast", "security", "policy"]);
+        ok(&["mast", "security", "reporting"]);
+        ok(&["mast", "security", "reporting", "on", "--repo", "o/r"]);
+        ok(&["mast", "security", "reporting", "off"]);
+        assert!(crate::App::try_parse_from(["mast", "security", "reporting", "maybe"]).is_err());
         ok(&[
             "mast", "security", "report", "-t", "x", "-b", "-", "--repo", "o/r",
         ]);
