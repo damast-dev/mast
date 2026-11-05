@@ -23,7 +23,7 @@ mast pr ready                                     # the PR for the current branc
 mast pr draft 42                                  # back to draft
 ```
 
-A draft is a pull request whose title starts with `WIP:`, which is how both Damast and Forgejo store drafts. So these commands work against plain Forgejo too, and `fj` users see the same drafts. On Damast, marking a draft ready also asks the code owners for review.
+A draft is a pull request whose title starts with `WIP:`, which is how both Damast and Forgejo store drafts. So these commands work against plain Forgejo too, and `fj` users see the same drafts. On Damast, marking a draft ready also asks the code owners for review. mast writes `WIP:` and recognises `WIP:` and `[WIP]`. If your server is configured with other `WORK_IN_PROGRESS_PREFIXES`, `mast pr ready` and `mast pr draft` stop with a message and leave the title as it was.
 
 ## Drop-in, like Damast
 
