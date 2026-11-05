@@ -20,12 +20,15 @@ On GitHub, `gh` is half the workflow. You open pull requests from the terminal, 
 ```sh
 mast security policy                                    # the repository's SECURITY.md
 mast security report -t "SQL injection in search" -b -  # report a vulnerability privately (body from stdin)
+mast security reporting on                              # admins: accept private reports (off, or no argument to check)
 mast advisory list                                      # advisories you may see; --state draft, --json
 mast advisory view DAMAST-58rf-qmv9-p456                # one advisory; --osv for OSV JSON
 mast advisory create -t "XSS in comments" -b "..." --cvss CVSS:3.1/... --cwe CWE-79 \
   --ecosystem npm --package app --vulnerable ">= 1.0, < 1.4.2" --patched 1.4.2
+mast advisory accept DAMAST-58rf-qmv9-p456             # a private report becomes a draft advisory
 mast advisory publish DAMAST-6hqg-4vm3-pv9g
 mast advisory close DAMAST-58rf-qmv9-p456
+mast advisory reopen DAMAST-58rf-qmv9-p456             # a closed advisory or report becomes a draft again
 mast advisory withdraw DAMAST-6hqg-4vm3-pv9g            # published by mistake: stays visible, marked withdrawn
 mast advisory comments DAMAST-58rf-qmv9-p456            # the private discussion
 mast advisory comment DAMAST-58rf-qmv9-p456 -b "Fix is in review"
