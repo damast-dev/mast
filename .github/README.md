@@ -19,7 +19,7 @@ On GitHub, `gh` is half the workflow. You open pull requests from the terminal, 
 
 ```sh
 mast pr suggestions 42                        # list the suggestions in a pull request's reviews
-mast pr suggestions apply 42 1817 1820        # commit two of them as one commit
+mast pr suggestions apply -p 42 1817 1820     # commit two of them as one commit
 mast pr suggestions apply --all -m "Polish"   # everything open, on the PR for the current branch
 ```
 
