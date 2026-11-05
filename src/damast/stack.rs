@@ -461,6 +461,27 @@ impl From<eyre::Report> for Error {
     }
 }
 
+/// The stack API URL of a pull request below `host`, keeping a sub-path install (the token
+/// belongs to that path, not to the whole origin) and encoding owner and repository names.
+fn stack_url(host: &Url, owner: &str, name: &str, id: i64) -> eyre::Result<Url> {
+    let mut url = host.clone();
+    url.path_segments_mut()
+        .map_err(|_| eyre!("invalid url"))?
+        .pop_if_empty()
+        .extend([
+            "api",
+            "v1",
+            "repos",
+            owner,
+            name,
+            "pulls",
+            &id.to_string(),
+            "damast",
+            "stack",
+        ]);
+    Ok(url)
+}
+
 /// The stack API of one pull request.
 struct Client<'a> {
     http: reqwest::Client,
@@ -482,11 +503,7 @@ impl<'a> Client<'a> {
         let token = keys.get_login(host).map(|login| match login {
             LoginInfo::Application { token } | LoginInfo::OAuth { token, .. } => token.clone(),
         });
-        let base = host.join(&format!(
-            "/api/v1/repos/{}/{}/pulls/{id}/damast/stack",
-            repo.owner(),
-            repo.name()
-        ))?;
+        let base = stack_url(host, repo.owner(), repo.name(), id)?;
         let http = reqwest::Client::builder()
             .user_agent(crate::USER_AGENT)
             .build()?;
@@ -672,6 +689,31 @@ mod tests {
         assert_eq!(
             (r.done, r.failed_at, r.message.as_str()),
             (vec![1], 2, "Stopped at #2: x")
+        );
+    }
+
+    #[test]
+    fn url_keeps_sub_path() {
+        let url = |host: &str, owner: &str| {
+            stack_url(&Url::parse(host).unwrap(), owner, "r", 7)
+                .unwrap()
+                .to_string()
+        };
+        assert_eq!(
+            url("https://example.com/forgejo/", "o"),
+            "https://example.com/forgejo/api/v1/repos/o/r/pulls/7/damast/stack"
+        );
+        assert_eq!(
+            url("https://example.com/forgejo", "o"),
+            "https://example.com/forgejo/api/v1/repos/o/r/pulls/7/damast/stack"
+        );
+        assert_eq!(
+            url("https://example.com", "o"),
+            "https://example.com/api/v1/repos/o/r/pulls/7/damast/stack"
+        );
+        assert_eq!(
+            url("https://example.com/", "../../x?"),
+            "https://example.com/api/v1/repos/..%2F..%2Fx%3F/r/pulls/7/damast/stack"
         );
     }
 
