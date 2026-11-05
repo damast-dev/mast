@@ -96,6 +96,10 @@ pub enum AdvisorySubcommand {
         #[clap(long)]
         cve: Option<String>,
     },
+    /// Accept a private vulnerability report as a draft advisory
+    Accept { id: String },
+    /// Reopen a closed advisory or report as a draft
+    Reopen { id: String },
     /// Publish a draft advisory
     Publish { id: String },
     /// Close an advisory or a report
@@ -430,6 +434,10 @@ impl AdvisoryCommand {
                 println!("{}", str_of(&a, "html_url"));
                 Ok(())
             }
+            // both are "draft" on the server: triage -> draft accepts, closed -> draft reopens
+            AdvisorySubcommand::Accept { id } | AdvisorySubcommand::Reopen { id } => {
+                set_state(&client, &id, "draft").await
+            }
             AdvisorySubcommand::Publish { id } => set_state(&client, &id, "published").await,
             AdvisorySubcommand::Close { id } => set_state(&client, &id, "closed").await,
             AdvisorySubcommand::Withdraw { id } => set_state(&client, &id, "withdrawn").await,
@@ -650,6 +658,8 @@ mod tests {
             "--cve",
             "CVE-2026-1",
         ]);
+        ok(&["mast", "advisory", "accept", "DAMAST-x"]);
+        ok(&["mast", "advisory", "reopen", "DAMAST-x"]);
         ok(&["mast", "advisory", "publish", "DAMAST-x"]);
         ok(&["mast", "advisory", "close", "DAMAST-x"]);
         ok(&["mast", "advisory", "withdraw", "DAMAST-x"]);
