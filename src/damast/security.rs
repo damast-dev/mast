@@ -67,7 +67,7 @@ pub struct AdvisoryCommand {
 pub enum AdvisorySubcommand {
     /// List the repository's security advisories you can see
     List {
-        /// Only advisories in this state (triage, draft, published, closed)
+        /// Only advisories in this state (triage, draft, published, closed, withdrawn)
         #[clap(long)]
         state: Option<String>,
         /// Print the API's JSON
@@ -100,6 +100,30 @@ pub enum AdvisorySubcommand {
     Publish { id: String },
     /// Close an advisory or a report
     Close { id: String },
+    /// Withdraw a published advisory that turned out to be wrong (final; it stays visible as withdrawn)
+    Withdraw { id: String },
+    /// Show the private discussion of an advisory
+    Comments {
+        id: String,
+        /// Print the API's JSON
+        #[clap(long)]
+        json: bool,
+    },
+    /// Comment in the private discussion; `-b -` reads the comment from stdin
+    Comment {
+        id: String,
+        #[clap(long, short)]
+        body: String,
+    },
+    /// Edit one of your comments (admins: any comment)
+    CommentEdit {
+        id: String,
+        comment: i64,
+        #[clap(long, short)]
+        body: String,
+    },
+    /// Delete one of your comments (admins: any comment)
+    CommentDelete { id: String, comment: i64 },
 }
 
 #[derive(Args, Clone, Debug)]
@@ -157,14 +181,7 @@ impl Content {
     }
 
     async fn json(&self) -> eyre::Result<Value> {
-        let body = if self.body == "-" {
-            let mut s = String::new();
-            tokio::io::AsyncReadExt::read_to_string(&mut tokio::io::stdin(), &mut s).await?;
-            s
-        } else {
-            self.body.clone()
-        };
-        Ok(self.to_json(body))
+        Ok(self.to_json(read_body(self.body.clone()).await?))
     }
 }
 
@@ -237,6 +254,9 @@ impl Client {
         let status = resp.status();
         let bytes = resp.bytes().await?;
         if status.is_success() {
+            if bytes.is_empty() {
+                return Ok(Value::Null); // 204 No Content
+            }
             return Ok(serde_json::from_slice(&bytes)?);
         }
         let message = serde_json::from_slice::<Value>(&bytes)
@@ -261,6 +281,8 @@ impl Client {
         if has_route && path.starts_with("/reports") {
             "private vulnerability reporting is off for this repository, or you can't report here"
                 .to_owned()
+        } else if has_route && path.contains("/comments/") {
+            "advisory or comment not found, or it is not yours".to_owned()
         } else if has_route {
             "advisory not found, or you may not see it".to_owned()
         } else if self
@@ -282,6 +304,29 @@ fn error_for(status: StatusCode, message: Option<String>) -> eyre::Report {
         StatusCode::TOO_MANY_REQUESTS => eyre!("{message} (report limit reached, try again later)"),
         _ => eyre!("{message}"),
     }
+}
+
+/// `-` means: read the text from stdin.
+async fn read_body(body: String) -> eyre::Result<String> {
+    if body != "-" {
+        return Ok(body);
+    }
+    let mut s = String::new();
+    tokio::io::AsyncReadExt::read_to_string(&mut tokio::io::stdin(), &mut s).await?;
+    Ok(s)
+}
+
+fn comment_path(id: &str, comment: i64) -> String {
+    format!("{}/comments/{comment}", id_path(id))
+}
+
+fn format_comment(c: &Value) -> String {
+    format!(
+        "#{} {} ({})",
+        c["id"],
+        str_of(&c["user"], "login"),
+        str_of(c, "created_at")
+    )
 }
 
 fn id_path(id: &str) -> String {
@@ -387,6 +432,51 @@ impl AdvisoryCommand {
             }
             AdvisorySubcommand::Publish { id } => set_state(&client, &id, "published").await,
             AdvisorySubcommand::Close { id } => set_state(&client, &id, "closed").await,
+            AdvisorySubcommand::Withdraw { id } => set_state(&client, &id, "withdrawn").await,
+            AdvisorySubcommand::Comments { id, json } => {
+                let list = client
+                    .send(Method::GET, &format!("{}/comments", id_path(&id)), None)
+                    .await?;
+                if json {
+                    return print_json(&list);
+                }
+                for c in list.as_array().map(Vec::as_slice).unwrap_or_default() {
+                    println!("{}", format_comment(c));
+                    println!("{}\n", crate::markdown(str_of(c, "body")));
+                }
+                Ok(())
+            }
+            AdvisorySubcommand::Comment { id, body } => {
+                let body = read_body(body).await?;
+                let c = client
+                    .send(
+                        Method::POST,
+                        &format!("{}/comments", id_path(&id)),
+                        Some(&json!({"body": body})),
+                    )
+                    .await?;
+                println!("Added comment {}", c["id"]);
+                Ok(())
+            }
+            AdvisorySubcommand::CommentEdit { id, comment, body } => {
+                let body = read_body(body).await?;
+                client
+                    .send(
+                        Method::PATCH,
+                        &comment_path(&id, comment),
+                        Some(&json!({"body": body})),
+                    )
+                    .await?;
+                println!("Edited comment {comment}");
+                Ok(())
+            }
+            AdvisorySubcommand::CommentDelete { id, comment } => {
+                client
+                    .send(Method::DELETE, &comment_path(&id, comment), None)
+                    .await?;
+                println!("Deleted comment {comment}");
+                Ok(())
+            }
         }
     }
 }
@@ -526,6 +616,9 @@ mod tests {
         assert!(e.to_string().contains("422"));
         assert!(NOT_DAMAST.contains("plain Forgejo"));
         assert_eq!(id_path("DAMAST-1/../x"), "/DAMAST-1%2F..%2Fx");
+        assert_eq!(comment_path("DAMAST-1", 7), "/DAMAST-1/comments/7");
+        let c = json!({"id": 7, "user": {"login": "alice"}, "created_at": "2026-11-05T05:34:56Z", "body": "x"});
+        assert_eq!(format_comment(&c), "#7 alice (2026-11-05T05:34:56Z)");
     }
 
     #[test]
@@ -559,6 +652,23 @@ mod tests {
         ]);
         ok(&["mast", "advisory", "publish", "DAMAST-x"]);
         ok(&["mast", "advisory", "close", "DAMAST-x"]);
+        ok(&["mast", "advisory", "withdraw", "DAMAST-x"]);
+        ok(&["mast", "advisory", "comments", "DAMAST-x", "--json"]);
+        ok(&["mast", "advisory", "comment", "DAMAST-x", "-b", "-"]);
+        ok(&[
+            "mast",
+            "advisory",
+            "comment-edit",
+            "DAMAST-x",
+            "7",
+            "-b",
+            "fixed",
+        ]);
+        ok(&["mast", "advisory", "comment-delete", "DAMAST-x", "7"]);
+        assert!(
+            crate::App::try_parse_from(["mast", "advisory", "comment-delete", "DAMAST-x", "seven"])
+                .is_err()
+        );
         assert!(
             crate::App::try_parse_from(["mast", "advisory", "list", "--osv", "--json"]).is_err()
         );

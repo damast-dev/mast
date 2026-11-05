@@ -26,6 +26,11 @@ mast advisory create -t "XSS in comments" -b "..." --cvss CVSS:3.1/... --cwe CWE
   --ecosystem npm --package app --vulnerable ">= 1.0, < 1.4.2" --patched 1.4.2
 mast advisory publish DAMAST-6hqg-4vm3-pv9g
 mast advisory close DAMAST-58rf-qmv9-p456
+mast advisory withdraw DAMAST-6hqg-4vm3-pv9g            # published by mistake: stays visible, marked withdrawn
+mast advisory comments DAMAST-58rf-qmv9-p456            # the private discussion
+mast advisory comment DAMAST-58rf-qmv9-p456 -b "Fix is in review"
+mast advisory comment-edit DAMAST-58rf-qmv9-p456 12 -b "Fix is merged"   # your own comments; admins any
+mast advisory comment-delete DAMAST-58rf-qmv9-p456 12
 mast advisory list --osv > advisories.osv.json          # export the published advisories
 ```
 
