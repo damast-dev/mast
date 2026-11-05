@@ -2080,8 +2080,11 @@ async fn view_pr_commits(
         let deletions = stats.deletions.unwrap_or_default();
 
         if oneline {
+            // DAMAST: co-authors
+            let damast =
+                crate::damast::coauthors::oneline_suffix(message, repo_commit.author.as_ref());
             println!(
-                "{yellow}{short_sha} {bright_green}+{additions:<additions_width$} {bright_red}-{deletions:<deletions_width$}{reset} {name}"
+                "{yellow}{short_sha} {bright_green}+{additions:<additions_width$} {bright_red}-{deletions:<deletions_width$}{reset} {name}{damast}"
             );
         } else {
             let author = repo_commit
@@ -2099,6 +2102,9 @@ async fn view_pr_commits(
                 "{yellow}commit {sha}{reset} ({bright_green}+{additions}{reset}, {bright_red}-{deletions}{reset})"
             );
             println!("Author: {author_name} <{author_email}>");
+            for co in crate::damast::coauthors::parse(message, author_email) {
+                println!("Co-author: {} <{}>", co.name, co.email); // DAMAST: co-authors
+            }
             print!("Date:   ");
             let format = time::macros::format_description!(
                 "[weekday repr:short] [month repr:short] [day] [hour repr:24]:[minute]:[second] [year] [offset_hour sign:mandatory][offset_minute]"

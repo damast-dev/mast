@@ -11,7 +11,11 @@ On GitHub, `gh` is half the workflow. You open pull requests from the terminal, 
 
 `fj` already does a lot of this for Forgejo, and does it well. mast starts from `fj` and adds what Damast adds to Forgejo, so the command line knows about the same things the web UI does.
 
-**Right now, mast is `fj` with a new name.** That is on purpose: it gives the fork a clean starting point that tracks `fj` from day one. Damast commands come next, starting with repo-bound packages.
+**Right now, mast is mostly `fj` with a new name.** That is on purpose: it gives the fork a clean starting point that tracks `fj` from day one. What mast adds so far:
+
+- **Co-authors.** `mast pr view <pr> commits` lists every `Co-authored-by:` trailer as a `Co-author:` line under the author, and `--oneline` ends each line with "Jonas Berg and 2 others", like Damast's web UI. mast reads the trailers itself, so this works against plain Forgejo too.
+
+Damast commands come next, starting with repo-bound packages.
 
 ## Drop-in, like Damast
 
