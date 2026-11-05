@@ -13,6 +13,22 @@ On GitHub, `gh` is half the workflow. You open pull requests from the terminal, 
 
 **Right now, mast is `fj` with a new name.** That is on purpose: it gives the fork a clean starting point that tracks `fj` from day one. Damast commands come next, starting with repo-bound packages.
 
+## What mast adds
+
+### Repo-bound packages
+
+```sh
+mast package list acme                                   # one line per package: versions, newest, repository
+mast package info acme npm tool                          # versions, linked repository, repository access
+mast package link acme npm tool tool-repo                # link to a repository of the same owner
+mast package unlink acme npm tool
+mast package inherit acme npm tool off                   # repository readers and writers no longer count
+mast package settings acme --new-packages repo_writers   # who may create new packages (default: owners)
+mast package delete acme npm tool 1.0.0                  # one version
+```
+
+`list`, `info`, `link`, `unlink` and `delete` use Forgejo's package API and work on any server. `inherit` and `settings` change Damast's [repo-bound packages](https://github.com/damast-dev/damast#packages-belong-to-their-repository); against plain Forgejo they stop with a clear message.
+
 ## Drop-in, like Damast
 
 - **Same commands, same flags.** Everything in the [fj wiki](https://codeberg.org/forgejo-contrib/forgejo-cli/wiki) works with `mast` in place of `fj`.

@@ -12,6 +12,7 @@ use keys::*;
 mod actions;
 mod auth;
 mod completion;
+mod damast; // DAMAST:
 mod issues;
 mod milestones;
 mod org;
@@ -73,6 +74,8 @@ pub enum Command {
     Org(org::OrgCommand),
     Version(version::VersionCommand),
     Completion(completion::CompletionCommand),
+    /// Packages and the repositories they belong to (Damast)
+    Package(damast::packages::PackageCommand), // DAMAST: repo-bound packages
 }
 
 impl Command {
@@ -92,6 +95,7 @@ impl Command {
             Command::Org(subcommand) => subcommand.run(keys, host_name).await?,
             Command::Version(command) => command.run().await?,
             Command::Completion(subcommand) => subcommand.run(),
+            Command::Package(subcommand) => subcommand.run(keys, host_name).await?, // DAMAST:
         }
         Ok(())
     }
