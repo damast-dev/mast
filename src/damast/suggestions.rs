@@ -92,15 +92,18 @@ impl SuggestionsCommand {
             Some(SuggestionsSubcommand::Apply {
                 ids, all, message, ..
             }) => {
-                let (ids, versions) = if all {
-                    let list: Vec<Suggestion> =
-                        serde_json::from_value(client.send(Method::GET, "", None).await?)?;
-                    (open_ids(&list), versions(&list))
+                // Damast requires the content version of every comment, so a suggestion edited
+                // after this list was fetched is refused instead of committed unseen.
+                let list: Vec<Suggestion> =
+                    serde_json::from_value(client.send(Method::GET, "", None).await?)?;
+                let versions = versions(&list);
+                let ids = if all {
+                    open_ids(&list)
                 } else {
                     let mut ids = ids;
                     ids.sort_unstable();
                     ids.dedup();
-                    (ids, Value::Null)
+                    ids
                 };
                 if ids.is_empty() {
                     bail!(if all {
@@ -156,6 +159,7 @@ fn format_list(list: &[Suggestion]) -> String {
             (Some("outdated"), ..) => " (outdated)",
             (Some("multiple"), ..) => " (more than one suggestion in the comment)",
             (Some("old_side"), ..) => " (on the old side of the diff)",
+            (Some("too_large"), ..) => " (too large to apply)",
             (_, true, _) => " (resolved)",
             (_, _, false) => " (you can't apply it)",
             _ => "",
@@ -364,6 +368,10 @@ mod tests {
         assert_eq!(
             out,
             "#1 src/a.rs:3 by @eve\n  - old\n  + new\n#2 src/a.rs:3-4 by @eve (outdated)\n  - old\n  + new\n"
+        );
+        assert!(
+            format_list(&[sug(1, false, false, Some("too_large"))])
+                .contains("(too large to apply)")
         );
     }
 
