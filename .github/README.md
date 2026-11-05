@@ -13,6 +13,24 @@ On GitHub, `gh` is half the workflow. You open pull requests from the terminal, 
 
 **Right now, mast is `fj` with a new name.** That is on purpose: it gives the fork a clean starting point that tracks `fj` from day one. Damast commands come next, starting with repo-bound packages.
 
+## What mast adds
+
+### Security advisories
+
+```sh
+mast security policy                                    # the repository's SECURITY.md
+mast security report -t "SQL injection in search" -b -  # report a vulnerability privately (body from stdin)
+mast advisory list                                      # advisories you may see; --state draft, --json
+mast advisory view DAMAST-58rf-qmv9-p456                # one advisory; --osv for OSV JSON
+mast advisory create -t "XSS in comments" -b "..." --cvss CVSS:3.1/... --cwe CWE-79 \
+  --ecosystem npm --package app --vulnerable ">= 1.0, < 1.4.2" --patched 1.4.2
+mast advisory publish DAMAST-6hqg-4vm3-pv9g
+mast advisory close DAMAST-58rf-qmv9-p456
+mast advisory list --osv > advisories.osv.json          # export the published advisories
+```
+
+These use Damast's [security advisories](https://github.com/damast-dev/damast#security-advisories-and-private-vulnerability-reports) API. Against plain Forgejo they stop with a clear message; only `mast security policy` works everywhere, because it just reads the file.
+
 ## Drop-in, like Damast
 
 - **Same commands, same flags.** Everything in the [fj wiki](https://codeberg.org/forgejo-contrib/forgejo-cli/wiki) works with `mast` in place of `fj`.
