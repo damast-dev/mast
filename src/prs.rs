@@ -221,6 +221,8 @@ pub enum PrSubcommand {
         #[clap(subcommand)]
         command: Option<ReviewCommand>,
     },
+    /// List or commit suggested changes from reviews (Damast)
+    Suggestions(crate::damast::suggestions::SuggestionsCommand), // DAMAST: review suggestions
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -685,6 +687,12 @@ impl PrCommand {
                     } => request_pr_review(repo, &api, id, reviewers, team_reviewers).await?,
                 }
             }
+            Suggestions(cmd) => {
+                // DAMAST: review suggestions
+                let (repo, id) =
+                    try_get_pr_number(repo, &api, cmd.pr().map(|pr| pr.number)).await?;
+                cmd.run(keys, repo_info.host_url(), &api, &repo, id).await?
+            }
         }
         Ok(())
     }
@@ -714,6 +722,7 @@ impl PrCommand {
             | Merge { pr, .. }
             | Browse { id: pr }
             | Review { id: pr, .. } => pr.as_ref().and_then(|x| x.repo.as_ref()),
+            Suggestions(cmd) => cmd.pr().and_then(|x| x.repo.as_ref()), // DAMAST:
         }
     }
 
@@ -753,6 +762,9 @@ impl PrCommand {
                     "can't figure out what repo to access, try specifying with `{{owner}}/{{repo}}#{{pr}}`",
                 ),
             },
+            Suggestions(_) => eyre::eyre!(
+                "can't figure out what repo to access, try specifying with `{{owner}}/{{repo}}#{{pr}}`",
+            ), // DAMAST:
         }
     }
 }

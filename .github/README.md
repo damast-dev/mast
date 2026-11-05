@@ -13,6 +13,18 @@ On GitHub, `gh` is half the workflow. You open pull requests from the terminal, 
 
 **Right now, mast is `fj` with a new name.** That is on purpose: it gives the fork a clean starting point that tracks `fj` from day one. Damast commands come next, starting with repo-bound packages.
 
+## What mast adds
+
+### Suggested changes from reviews
+
+```sh
+mast pr suggestions 42                        # list the suggestions in a pull request's reviews
+mast pr suggestions apply 42 1817 1820        # commit two of them as one commit
+mast pr suggestions apply --all -m "Polish"   # everything open, on the PR for the current branch
+```
+
+Reviewers write ` ```suggestion ` blocks on Damast like on GitHub. `apply` commits them to the pull request's branch the same way the web UI does: one commit, reviewers credited with `Co-authored-by:` trailers, conversations resolved, outdated or overlapping suggestions refused. Against plain Forgejo, both commands say that they need Damast.
+
 ## Drop-in, like Damast
 
 - **Same commands, same flags.** Everything in the [fj wiki](https://codeberg.org/forgejo-contrib/forgejo-cli/wiki) works with `mast` in place of `fj`.
