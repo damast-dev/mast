@@ -147,14 +147,14 @@ impl StackCommand {
             Some(StackSubcommand::Sync { .. }) => {
                 let id = id.ok_or_eyre("no pull request")?;
                 let client = Client::new(keys, host, api, repo, id)?;
-                let res = client.action("/rebase", json!({})).await?;
+                let res = client.action("/rebase", json!({}), false).await?;
                 report(res, "rebased", "the stack is already up to date")?;
             }
             Some(StackSubcommand::Merge { style, .. }) => {
                 let id = id.ok_or_eyre("no pull request")?;
                 let client = Client::new(keys, host, api, repo, id)?;
                 let res = client
-                    .action("/merge", json!({"style": style.unwrap_or_default()}))
+                    .action("/merge", json!({"style": style.unwrap_or_default()}), true)
                     .await?;
                 report(res, "merged", "nothing to merge")?;
             }
@@ -332,10 +332,18 @@ fn nearest_parent<'a>(
         if !same_repo || l.head == branch {
             continue;
         }
-        let Ok(oid) = git2::Oid::from_str(&l.head_sha) else {
-            continue;
-        };
-        if oid == head || git.graph_descendant_of(head, oid).unwrap_or(false) {
+        // the server's head, or the local branch of that name when the layer was pushed
+        // again after the current branch forked off it
+        let local = git
+            .find_branch(&l.head, git2::BranchType::Local)
+            .ok()
+            .and_then(|b| b.get().target());
+        let contained = git2::Oid::from_str(&l.head_sha)
+            .ok()
+            .into_iter()
+            .chain(local)
+            .find(|&oid| oid == head || git.graph_descendant_of(head, oid).unwrap_or(false));
+        if let Some(oid) = contained {
             candidates.push((l, oid));
         }
     }
@@ -555,10 +563,16 @@ impl<'a> Client<'a> {
 
     /// Runs a stack action with the head commits the stack shows right now, so that the
     /// server refuses to touch a branch that moved in between.
-    async fn action(&self, suffix: &str, mut body: Value) -> eyre::Result<ActionResult> {
+    async fn action(
+        &self,
+        suffix: &str,
+        mut body: Value,
+        need_stack: bool,
+    ) -> eyre::Result<ActionResult> {
         let (_, v) = self.send(Method::GET, "", None).await?;
         let stack: Stack = serde_json::from_value(v)?;
-        if stack.layers.len() < 2 {
+        // a lone layer can still be synced: after a squash merge below it, that drops the old commits
+        if need_stack && stack.layers.len() < 2 {
             bail!(
                 "#{} is not part of a stack; use `mast pr merge` for a single pull request",
                 stack.current
@@ -716,6 +730,24 @@ mod tests {
         let p = nearest_parent(&git, ids[1], "a2", &prs).unwrap().unwrap();
         assert_eq!(p.number, 1);
         assert!(nearest_parent(&git, ids[0], "x", &prs).unwrap().is_none());
+
+        // b was pushed again after c branched off it: the server's head of #2 is not in c,
+        // but the local branch b is, so #2 (not #1) is still the layer below
+        let b2 = git
+            .commit(
+                None,
+                &sig,
+                &sig,
+                "b2",
+                &tree,
+                &[&git.find_commit(ids[2]).unwrap()],
+            )
+            .unwrap();
+        git.branch("b", &git.find_commit(ids[2]).unwrap(), true)
+            .unwrap();
+        let prs = [layer(1, "a", "main", ids[1]), layer(2, "b", "a", b2)];
+        let p = nearest_parent(&git, ids[3], "c", &prs).unwrap().unwrap();
+        assert_eq!(p.number, 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
