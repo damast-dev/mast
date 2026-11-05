@@ -4,6 +4,16 @@
 
 const KEY: &str = "co-authored-by:";
 
+/// At most this many co-authors per commit, like the server.
+const MAX: usize = 100;
+
+/// Control and bidi override characters (Go's unicode.IsControl / unicode.Bidi_Control): they could
+/// reorder the surrounding text or inject terminal escapes.
+fn unsafe_char(c: char) -> bool {
+    c.is_control()
+        || matches!(c, '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct CoAuthor {
     pub name: String,
@@ -14,13 +24,12 @@ pub struct CoAuthor {
 pub fn parse(message: &str, author_email: &str) -> Vec<CoAuthor> {
     let message = message.replace("\r\n", "\n");
     let message = message.trim();
-    let block = match message.rfind("\n\n") {
-        Some(i) => &message[i + 2..],
-        None if !message.contains('\n') => return Vec::new(), // a lone subject is never a trailer block
-        None => message,
+    let Some(i) = message.rfind("\n\n") else {
+        return Vec::new(); // the first paragraph is the subject, never a trailer block (git interpret-trailers)
     };
+    let block = &message[i + 2..];
 
-    let mut seen = vec![author_email.trim().to_lowercase()];
+    let mut seen = std::collections::HashSet::from([author_email.trim().to_lowercase()]);
     let mut out = Vec::new();
     for line in block.lines().map(str::trim) {
         let Some(value) = line
@@ -35,16 +44,20 @@ pub fn parse(message: &str, author_email: &str) -> Vec<CoAuthor> {
         };
         let email = value[lt + 1..value.len() - 1].trim();
         let valid = matches!(email.find('@'), Some(at) if at > 0 && at + 1 < email.len() && email.rfind('@') == Some(at))
-            && !email.contains(['<', '>', ' ', '\t']);
-        if !valid || seen.contains(&email.to_lowercase()) {
+            && !email.contains(['<', '>', ' '])
+            && !email.contains(unsafe_char);
+        if !valid || !seen.insert(email.to_lowercase()) {
             continue;
         }
-        seen.push(email.to_lowercase());
-        let name = value[..lt].trim().trim_matches('"');
+        let name: String = value[..lt].chars().filter(|&c| !unsafe_char(c)).collect();
+        let name = name.trim().trim_matches('"');
         out.push(CoAuthor {
             name: if name.is_empty() { email } else { name }.to_string(),
             email: email.to_string(),
         });
+        if out.len() == MAX {
+            break;
+        }
     }
     out
 }
@@ -106,6 +119,34 @@ mod tests {
             parse("feat\n\nCo-authored-by: <only@x.org>", ""),
             vec![co("only@x.org", "only@x.org")]
         );
+    }
+
+    /// Same vectors as Damast's server parser (modules/damast/coauthor/testdata/parse_vectors.json): keep both copies equal.
+    #[test]
+    fn matches_server_vectors() {
+        #[derive(serde::Deserialize)]
+        struct Case {
+            name: String,
+            message: String,
+            author: String,
+            want: Vec<(String, String)>,
+        }
+        let cases: Vec<Case> =
+            serde_json::from_str(include_str!("coauthors_vectors.json")).unwrap();
+        for c in cases {
+            let want: Vec<CoAuthor> = c.want.iter().map(|(n, e)| co(n, e)).collect();
+            assert_eq!(parse(&c.message, &c.author), want, "{}", c.name);
+        }
+    }
+
+    #[test]
+    fn caps_huge_trailer_blocks() {
+        let msg = (0..100_000).fold("mob\n\n".to_string(), |m, i| {
+            m + &format!("Co-authored-by: N{i} <n{i}@x.org>\n")
+        });
+        let got = parse(&msg, "");
+        assert_eq!(got.len(), MAX);
+        assert_eq!(got[99], co("N99", "n99@x.org"));
     }
 
     #[test]
