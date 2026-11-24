@@ -116,7 +116,7 @@ jobs:
           cat > notes.md <<NOTES
           Built on forgejo-cli (fj) ${VERSION%%-mast*}. Same commands, same config: mast and fj share their logins.
 
-          Install: \`brew install damast-dev/tap/mast\`, \`sudo apt install mast\` from https://damast-dev.github.io/apt, or download a binary below (check it against \`SHA256SUMS\`).
+          Install: \`brew trust --tap damast-dev/tap && brew install damast-dev/tap/mast\`, \`sudo apt install mast\` from https://damast-dev.github.io/apt, or download a binary below (check it against \`SHA256SUMS\`).
           NOTES
           gh release create "$GITHUB_REF_NAME" "${flags[@]}" --notes-file notes.md dist/*
 
@@ -138,6 +138,7 @@ jobs:
         run: |
           .github/scripts/formula.sh "$VERSION" dist/SHA256SUMS > mast.rb
           brew tap-new --no-git damast-dev/check
+          brew trust --tap damast-dev/check # Homebrew refuses formulae from untrusted taps
           formula=$(brew --repo damast-dev/check)/Formula/mast.rb
           cp mast.rb "$formula"
           brew style damast-dev/check/mast

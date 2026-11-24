@@ -26,6 +26,7 @@ Every release ships ready-made packages, so you don't need a Rust toolchain. mas
 **macOS and Linux, with Homebrew:**
 
 ```sh
+brew trust --tap damast-dev/tap   # Homebrew only loads formulae from taps you trust
 brew install damast-dev/tap/mast
 ```
 
