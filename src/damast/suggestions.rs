@@ -31,7 +31,9 @@ pub struct SuggestionsCommand {
 enum SuggestionsSubcommand {
     /// Commit suggestions to the pull request's branch as one commit
     Apply {
-        /// The pull request (defaults to the one for the current branch)
+        /// The pull request (defaults to the one for the current branch). A flag, so that
+        /// `apply 1817` means comment 1817 and not pull request 1817.
+        #[clap(long, short)]
         pr: Option<IssueId>,
         /// Comment IDs of the suggestions, as listed by `mast pr suggestions`
         ids: Vec<i64>,
@@ -59,6 +61,9 @@ struct Suggestion {
     applicable: bool,
     #[serde(default)]
     problem: Option<String>,
+    /// Older Damast versions don't send it.
+    #[serde(default)]
+    content_version: Option<i64>,
 }
 
 impl SuggestionsCommand {
@@ -87,12 +92,15 @@ impl SuggestionsCommand {
             Some(SuggestionsSubcommand::Apply {
                 ids, all, message, ..
             }) => {
-                let ids = if all {
+                let (ids, versions) = if all {
                     let list: Vec<Suggestion> =
                         serde_json::from_value(client.send(Method::GET, "", None).await?)?;
-                    open_ids(&list)
+                    (open_ids(&list), versions(&list))
                 } else {
-                    ids
+                    let mut ids = ids;
+                    ids.sort_unstable();
+                    ids.dedup();
+                    (ids, Value::Null)
                 };
                 if ids.is_empty() {
                     bail!(if all {
@@ -101,7 +109,7 @@ impl SuggestionsCommand {
                         "give the comment IDs of the suggestions to apply, or --all"
                     });
                 }
-                let body = json!({"comment_ids": ids, "message": message.unwrap_or_default()});
+                let body = json!({"comment_ids": ids, "message": message.unwrap_or_default(), "content_versions": versions});
                 let resp = client.send(Method::POST, "/apply", Some(&body)).await?;
                 let n = ids.len();
                 println!(
@@ -121,6 +129,16 @@ fn open_ids(list: &[Suggestion]) -> Vec<i64> {
         .filter(|s| s.applicable && !s.resolved)
         .map(|s| s.comment_id)
         .collect()
+}
+
+/// The content version of each listed suggestion, so the server refuses those edited since the
+/// list was fetched: `--all` must not commit suggestions nobody has seen.
+fn versions(list: &[Suggestion]) -> Value {
+    let map: serde_json::Map<String, Value> = list
+        .iter()
+        .filter_map(|s| Some((s.comment_id.to_string(), json!(s.content_version?))))
+        .collect();
+    Value::Object(map)
 }
 
 fn format_list(list: &[Suggestion]) -> String {
@@ -264,6 +282,7 @@ mod tests {
             resolved,
             applicable,
             problem: problem.map(Into::into),
+            content_version: Some(id * 10),
         }
     }
 
@@ -275,14 +294,28 @@ mod tests {
             s.contains("Suggestions") && s.contains("number: 7") && s.contains("command: None")
         );
 
-        let app =
-            crate::App::try_parse_from(["mast", "pr", "suggestions", "apply", "7", "11", "12"])
-                .unwrap();
+        let app = crate::App::try_parse_from([
+            "mast",
+            "pr",
+            "suggestions",
+            "apply",
+            "-p",
+            "7",
+            "11",
+            "12",
+        ])
+        .unwrap();
         let s = format!("{app:?}");
         assert!(
             s.contains("number: 7") && s.contains("ids: [11, 12]"),
             "{s}"
         );
+
+        // a lone positional is a comment ID, not the pull request
+        let app =
+            crate::App::try_parse_from(["mast", "pr", "suggestions", "apply", "1817"]).unwrap();
+        let s = format!("{app:?}");
+        assert!(s.contains("pr: None") && s.contains("ids: [1817]"), "{s}");
 
         let app = crate::App::try_parse_from([
             "mast",
@@ -301,7 +334,7 @@ mod tests {
         );
 
         assert!(
-            crate::App::try_parse_from(["mast", "pr", "suggestions", "apply", "7", "11", "--all"])
+            crate::App::try_parse_from(["mast", "pr", "suggestions", "apply", "11", "--all"])
                 .is_err()
         );
     }
@@ -315,6 +348,10 @@ mod tests {
             sug(4, true, false, None),
         ];
         assert_eq!(open_ids(&list), vec![1, 4]);
+        assert_eq!(versions(&list), json!({"1": 10, "2": 20, "3": 30, "4": 40}));
+        let mut old = sug(5, true, false, None);
+        old.content_version = None;
+        assert_eq!(versions(&[old]), json!({}));
     }
 
     #[test]
