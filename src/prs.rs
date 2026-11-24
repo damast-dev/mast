@@ -221,6 +221,8 @@ pub enum PrSubcommand {
         #[clap(subcommand)]
         command: Option<ReviewCommand>,
     },
+    /// Show, extend, rebase or merge a stack of pull requests
+    Stack(crate::damast::stack::StackCommand), // DAMAST: stacked pull requests
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -685,6 +687,26 @@ impl PrCommand {
                     } => request_pr_review(repo, &api, id, reviewers, team_reviewers).await?,
                 }
             }
+            Stack(cmd) => {
+                // DAMAST: stacked pull requests
+                let (repo, id) = if cmd.needs_pr() {
+                    let (repo, id) =
+                        try_get_pr_number(repo, &api, cmd.pr().map(|pr| pr.number)).await?;
+                    (repo, Some(id))
+                } else {
+                    (repo.clone(), None)
+                };
+                let remote = repo_info.remote_name().map(str::to_owned);
+                cmd.run(
+                    keys,
+                    repo_info.host_url(),
+                    &api,
+                    &repo,
+                    id,
+                    remote.as_deref(),
+                )
+                .await?
+            }
         }
         Ok(())
     }
@@ -714,6 +736,7 @@ impl PrCommand {
             | Merge { pr, .. }
             | Browse { id: pr }
             | Review { id: pr, .. } => pr.as_ref().and_then(|x| x.repo.as_ref()),
+            Stack(cmd) => cmd.pr().and_then(|x| x.repo.as_ref()), // DAMAST:
         }
     }
 
@@ -753,6 +776,9 @@ impl PrCommand {
                     "can't figure out what repo to access, try specifying with `{{owner}}/{{repo}}#{{pr}}`",
                 ),
             },
+            Stack(_) => eyre::eyre!(
+                "can't figure out what repo to access, try specifying with `{{owner}}/{{repo}}#{{pr}}`",
+            ), // DAMAST:
         }
     }
 }

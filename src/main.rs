@@ -12,6 +12,7 @@ use keys::*;
 mod actions;
 mod auth;
 mod completion;
+mod damast; // DAMAST:
 mod issues;
 mod milestones;
 mod org;
