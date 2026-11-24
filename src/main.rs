@@ -27,6 +27,7 @@ mod wiki;
 
 mod localization;
 
+
 pub const USER_AGENT: &str = concat!(
     env!("CARGO_PKG_NAME"),
     "/",

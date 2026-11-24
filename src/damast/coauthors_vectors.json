@@ -1,0 +1,154 @@
+[
+ {
+  "name": "none",
+  "message": "fix: thing\n\nbody text",
+  "author": "a@x.org",
+  "want": []
+ },
+ {
+  "name": "subject only",
+  "message": "Co-authored-by: Bob <bob@x.org>",
+  "author": "a@x.org",
+  "want": []
+ },
+ {
+  "name": "first paragraph is the subject",
+  "message": "feat\nCo-authored-by: Bob <bob@x.org>",
+  "author": "",
+  "want": []
+ },
+ {
+  "name": "multiple, case-insensitive key, CRLF",
+  "message": "feat: x\r\n\r\nbody\r\n\r\nCo-authored-by: Bob <bob@x.org>\r\nco-AUTHORED-by: Eve Doe <eve@x.org>\r\nSigned-off-by: A <a@x.org>",
+  "author": "a@x.org",
+  "want": [
+   [
+    "Bob",
+    "bob@x.org"
+   ],
+   [
+    "Eve Doe",
+    "eve@x.org"
+   ]
+  ]
+ },
+ {
+  "name": "dedupe and drop author",
+  "message": "feat\n\nCo-authored-by: Bob <bob@x.org>\nCo-authored-by: bob <BOB@x.org>\nCo-authored-by: Me <A@x.org>",
+  "author": "a@x.org",
+  "want": [
+   [
+    "Bob",
+    "bob@x.org"
+   ]
+  ]
+ },
+ {
+  "name": "broken lines skipped",
+  "message": "feat\n\nCo-authored-by: no email\nCo-authored-by:\nCo-authored-by: <only@x.org>\nCo-authored-by: <>",
+  "author": "",
+  "want": [
+   [
+    "only@x.org",
+    "only@x.org"
+   ]
+  ]
+ },
+ {
+  "name": "names that RFC 5322 rejects",
+  "message": "feat\n\nCo-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>\nCo-authored-by: Doe, John <j@x.org>\nCo-authored-by: \"Quoted\" <q@x.org>\nCo-authored-by: \"\" <e@x.org>",
+  "author": "",
+  "want": [
+   [
+    "dependabot[bot]",
+    "49699333+dependabot[bot]@users.noreply.github.com"
+   ],
+   [
+    "Doe, John",
+    "j@x.org"
+   ],
+   [
+    "Quoted",
+    "q@x.org"
+   ],
+   [
+    "e@x.org",
+    "e@x.org"
+   ]
+  ]
+ },
+ {
+  "name": "invalid emails skipped",
+  "message": "feat\n\nCo-authored-by: A <a>\nCo-authored-by: B <@x.org>\nCo-authored-by: C <c@>\nCo-authored-by: D <d@x@y>\nCo-authored-by: E <e@x.org> trailing\nCo-authored-by: F <f@x.org\n>",
+  "author": "",
+  "want": []
+ },
+ {
+  "name": "not in last paragraph",
+  "message": "feat\n\nCo-authored-by: Bob <bob@x.org>\n\nmore text",
+  "author": "",
+  "want": []
+ },
+ {
+  "name": "angle brackets in the name: the last <...> is the email",
+  "message": "feat\n\nCo-authored-by: A <b> <c@x.org>\nCo-authored-by: B> <d@x.org>\nCo-authored-by:C<e@x.org>",
+  "author": "",
+  "want": [
+   [
+    "A <b>",
+    "c@x.org"
+   ],
+   [
+    "B>",
+    "d@x.org"
+   ],
+   [
+    "C",
+    "e@x.org"
+   ]
+  ]
+ },
+ {
+  "name": "unicode names and IDN emails",
+  "message": "feat\n\nCo-authored-by: Jürgen Müller <jürgen@bücher.de>",
+  "author": "",
+  "want": [
+   [
+    "Jürgen Müller",
+    "jürgen@bücher.de"
+   ]
+  ]
+ },
+ {
+  "name": "bidi overrides and control characters dropped from names",
+  "message": "feat\n\nCo-authored-by: ‮evil‬⁦ <x@x.org>\nCo-authored-by: a\u0000b\u0007 <y@x.org>",
+  "author": "",
+  "want": [
+   [
+    "evil",
+    "x@x.org"
+   ],
+   [
+    "ab",
+    "y@x.org"
+   ]
+  ]
+ },
+ {
+  "name": "emails with control or bidi characters skipped",
+  "message": "feat\n\nCo-authored-by: A <a\u0000@x.org>\nCo-authored-by: B <b\u0001@x.org>\nCo-authored-by: C <c‮@x.org>\nCo-authored-by: D <d\t@x.org>",
+  "author": "",
+  "want": []
+ },
+ {
+  "name": "trailing blank lines and comment lines",
+  "message": "feat\n\nCo-authored-by: A <a@x.org>\n# comment\n\n\n",
+  "author": "",
+  "want": [
+   [
+    "A",
+    "a@x.org"
+   ]
+  ]
+ }
+]
