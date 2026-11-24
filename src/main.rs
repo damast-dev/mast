@@ -27,6 +27,7 @@ mod wiki;
 
 mod localization;
 
+
 pub const USER_AGENT: &str = concat!(
     env!("CARGO_PKG_NAME"),
     "/",
@@ -37,7 +38,7 @@ pub const USER_AGENT: &str = concat!(
 );
 
 #[derive(Parser, Debug)]
-#[command(name = "mast")] // DAMAST: binary name
+#[command(name = "mast", version)] // DAMAST: binary name, --version for package managers
 #[clap(disable_help_subcommand = true)]
 pub struct App {
     #[clap(long, short = 'H', global = true)]
@@ -76,6 +77,10 @@ pub enum Command {
     Completion(completion::CompletionCommand),
     /// Packages and the repositories they belong to (Damast)
     Package(damast::packages::PackageCommand), // DAMAST: repo-bound packages
+    /// Security policy and private vulnerability reports (Damast)
+    Security(damast::security::SecurityCommand), // DAMAST: security tab
+    /// Repository security advisories (Damast)
+    Advisory(damast::security::AdvisoryCommand), // DAMAST: security advisories
 }
 
 impl Command {
@@ -96,6 +101,8 @@ impl Command {
             Command::Version(command) => command.run().await?,
             Command::Completion(subcommand) => subcommand.run(),
             Command::Package(subcommand) => subcommand.run(keys, host_name).await?, // DAMAST:
+            Command::Security(subcommand) => subcommand.run(keys, host_name).await?, // DAMAST:
+            Command::Advisory(subcommand) => subcommand.run(keys, host_name).await?, // DAMAST:
         }
         Ok(())
     }
