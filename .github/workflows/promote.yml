@@ -1,0 +1,35 @@
+# Promotes a release candidate to a final release: tags the same commit as vX.Y.Z-mast.N.
+name: promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      rc:
+        description: "RC tag to promote, e.g. v0.7.0-mast.1-rc.2 (empty: newest open RC)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_TOKEN }} # a tag pushed with GITHUB_TOKEN would not start release.yml
+      - name: Tag final release
+        env:
+          RC: ${{ inputs.rc }}
+        run: |
+          rc=${RC:-$(.github/scripts/version.sh latest-rc)}
+          [[ -n $rc ]] || { echo "::error::no open release candidate"; exit 1; }
+          git rev-parse -q --verify "refs/tags/$rc" >/dev/null || { echo "::error::tag $rc does not exist"; exit 1; }
+          final=$(.github/scripts/version.sh final "$rc")
+          if git rev-parse -q --verify "refs/tags/$final" >/dev/null; then echo "::error::$final already exists"; exit 1; fi
+          git config user.name "mast-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$final" -m "mast $final (promoted from $rc)" "$rc^{commit}"
+          git push origin "$final"
+          echo "### Promoted \`$rc\` → \`$final\`" >> "$GITHUB_STEP_SUMMARY"
