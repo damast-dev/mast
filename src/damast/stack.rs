@@ -373,7 +373,9 @@ fn format_stack(stack: &Stack) -> String {
     if stack.layers.len() < 2 {
         return format!("#{} is not part of a stack\n", stack.current);
     }
-    let mut out = format!("{}\n", clean(&stack.trunk));
+    // the trunk is empty when the walk stopped before reaching it
+    let trunk = clean(&stack.trunk);
+    let mut out = format!("{}\n", if trunk.is_empty() { "(trunk not reached)" } else { &trunk });
     for l in &stack.layers {
         let checks = match l.checks.as_str() {
             "" => "",
@@ -691,9 +693,6 @@ impl<'a> Client<'a> {
     ) -> eyre::Result<ActionResult> {
         let (_, v) = self.send(Method::GET, "", None).await?;
         let stack: Stack = serde_json::from_value(v)?;
-        if stack.truncated {
-            bail!("the stack is too large or has a cycle: sync and merge are not available for it");
-        }
         // a lone layer can still be synced: after a squash merge below it, that drops the old commits
         if need_stack && stack.layers.len() < 2 {
             bail!(
@@ -953,6 +952,16 @@ mod tests {
                 .number,
             4
         );
+    }
+
+    #[test]
+    fn empty_trunk_and_truncated() {
+        let mut s = derive(&[pr(1, "a", "main", true), pr(2, "b", "a", true)], 2).unwrap();
+        s.trunk.clear();
+        s.truncated = true;
+        let out = format_stack(&s);
+        assert!(out.starts_with("(trunk not reached)\n"), "{out:?}");
+        assert!(out.contains("only part of it is shown"), "{out:?}");
     }
 
     #[test]
