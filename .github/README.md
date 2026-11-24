@@ -41,6 +41,16 @@ mast pr stack merge --up-to 42    # merge the bottom layers up to #42, one after
 
 Like `gh stack`: split a big change into small pull requests that build on each other. A pull request is a layer when its base branch is the head branch of another open pull request in the same repository, so there is nothing to set up. `push` finds the layer to build on by itself (the nearest open pull request whose head commit, or local branch, your branch contains), or takes `--on <pr>`. `sync` and `merge` run on the server, through Damast's normal update and merge checks: they stop at the first conflict, moved branch or layer that isn't ready, and say which. `mast pr stack` and `push` work against plain Forgejo too; `sync` and `merge` say that they need Damast.
 
+### Suggested changes from reviews
+
+```sh
+mast pr suggestions 42                        # list the suggestions in a pull request's reviews
+mast pr suggestions apply -p 42 1817 1820     # commit two of them as one commit
+mast pr suggestions apply --all -m "Polish"   # everything open, on the PR for the current branch
+```
+
+Reviewers write ` ```suggestion ` blocks on Damast like on GitHub. `apply` commits them to the pull request's branch the same way the web UI does: one commit, reviewers credited with `Co-authored-by:` trailers, conversations resolved, outdated or overlapping suggestions refused. Against plain Forgejo, both commands say that they need Damast.
+
 ## Drop-in, like Damast
 
 - **Same commands, same flags.** Everything in the [fj wiki](https://codeberg.org/forgejo-contrib/forgejo-cli/wiki) works with `mast` in place of `fj`.
