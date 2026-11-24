@@ -75,6 +75,10 @@ pub enum Command {
     Org(org::OrgCommand),
     Version(version::VersionCommand),
     Completion(completion::CompletionCommand),
+    /// Security policy and private vulnerability reports (Damast)
+    Security(damast::security::SecurityCommand), // DAMAST: security tab
+    /// Repository security advisories (Damast)
+    Advisory(damast::security::AdvisoryCommand), // DAMAST: security advisories
 }
 
 impl Command {
@@ -94,6 +98,8 @@ impl Command {
             Command::Org(subcommand) => subcommand.run(keys, host_name).await?,
             Command::Version(command) => command.run().await?,
             Command::Completion(subcommand) => subcommand.run(),
+            Command::Security(subcommand) => subcommand.run(keys, host_name).await?, // DAMAST:
+            Command::Advisory(subcommand) => subcommand.run(keys, host_name).await?, // DAMAST:
         }
         Ok(())
     }

@@ -51,6 +51,30 @@ mast pr suggestions apply --all -m "Polish"   # everything open, on the PR for t
 
 Reviewers write ` ```suggestion ` blocks on Damast like on GitHub. `apply` commits them to the pull request's branch the same way the web UI does: one commit, reviewers credited with `Co-authored-by:` trailers, conversations resolved, outdated or overlapping suggestions refused. Against plain Forgejo, both commands say that they need Damast.
 
+### Security advisories
+
+```sh
+mast security policy                                    # the repository's SECURITY.md
+mast security report -t "SQL injection in search" -b -  # report a vulnerability privately (body from stdin)
+mast security reporting on                              # admins: accept private reports (off, or no argument to check)
+mast advisory list                                      # advisories you may see; --state draft, --json
+mast advisory view DAMAST-58rf-qmv9-p456                # one advisory; --osv for OSV JSON
+mast advisory create -t "XSS in comments" -b "..." --cvss CVSS:3.1/... --cwe CWE-79 \
+  --ecosystem npm --package app --vulnerable ">= 1.0, < 1.4.2" --patched 1.4.2
+mast advisory accept DAMAST-58rf-qmv9-p456             # a private report becomes a draft advisory
+mast advisory publish DAMAST-6hqg-4vm3-pv9g
+mast advisory close DAMAST-58rf-qmv9-p456
+mast advisory reopen DAMAST-58rf-qmv9-p456             # a closed advisory or report becomes a draft again
+mast advisory withdraw DAMAST-6hqg-4vm3-pv9g            # published by mistake: stays visible, marked withdrawn
+mast advisory comments DAMAST-58rf-qmv9-p456            # the private discussion
+mast advisory comment DAMAST-58rf-qmv9-p456 -b "Fix is in review"
+mast advisory comment-edit DAMAST-58rf-qmv9-p456 12 -b "Fix is merged"   # your own comments; admins any
+mast advisory comment-delete DAMAST-58rf-qmv9-p456 12
+mast advisory list --osv > advisories.osv.json          # export the published advisories
+```
+
+These use Damast's [security advisories](https://github.com/damast-dev/damast#security-advisories-and-private-vulnerability-reports) API. Against plain Forgejo they stop with a clear message; only `mast security policy` works everywhere, because it just reads the file.
+
 ## Drop-in, like Damast
 
 - **Same commands, same flags.** Everything in the [fj wiki](https://codeberg.org/forgejo-contrib/forgejo-cli/wiki) works with `mast` in place of `fj`.
