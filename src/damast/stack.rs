@@ -74,6 +74,9 @@ struct Stack {
     trunk: String,
     current: i64,
     layers: Vec<Layer>,
+    /// The server stopped at its layer cap or found a cycle: the map is partial.
+    #[serde(default)]
+    truncated: bool,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]
@@ -148,7 +151,13 @@ impl StackCommand {
                 let id = id.ok_or_eyre("no pull request")?;
                 let client = Client::new(keys, host, api, repo, id)?;
                 let res = client.action("/rebase", json!({}), false).await?;
+                let ok = res.failed_at == 0;
                 report(res, "rebased", "the stack is already up to date")?;
+                if ok {
+                    let (_, v) = client.send(Method::GET, "", None).await?;
+                    let stack: Stack = serde_json::from_value(v)?;
+                    fast_forward(&stack, remote);
+                }
             }
             Some(StackSubcommand::Merge { style, .. }) => {
                 let id = id.ok_or_eyre("no pull request")?;
@@ -176,9 +185,80 @@ fn report(res: ActionResult, verb: &str, nothing: &str) -> eyre::Result<()> {
         _ => {}
     }
     if res.failed_at != 0 {
-        bail!("{}", res.message);
+        bail!("{}", clean(&res.message));
     }
     Ok(())
+}
+
+/// Server-provided text goes to the terminal: drop control characters (escape sequences).
+fn clean(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control()).collect()
+}
+
+/// Fast-forwards the local branches of the stack that are behind their remote branch. A dirty
+/// working tree or a diverged branch is never touched; what is skipped is printed.
+fn fast_forward(stack: &Stack, remote: Option<&str>) {
+    let Some(remote) = remote else { return };
+    let Ok(git) = git2::Repository::discover(".") else {
+        return;
+    };
+    let fetched = std::process::Command::new("git")
+        .args(["fetch", "--quiet", remote])
+        .status()
+        .is_ok_and(|s| s.success());
+    if !fetched {
+        eprintln!("could not fetch {remote}, local branches not updated");
+        return;
+    }
+    let current = git
+        .head()
+        .ok()
+        .filter(|h| h.is_branch())
+        .and_then(|h| h.shorthand().ok().map(str::to_owned));
+    for l in &stack.layers {
+        let name = clean(&l.head);
+        let Ok(local) = git.find_branch(&l.head, git2::BranchType::Local) else {
+            continue;
+        };
+        let (Some(local), Ok(up)) = (
+            local.get().target(),
+            git.refname_to_id(&format!("refs/remotes/{remote}/{}", l.head)),
+        ) else {
+            continue;
+        };
+        if local == up || git.graph_descendant_of(local, up).unwrap_or(false) {
+            continue; // up to date, or ahead
+        }
+        if !git.graph_descendant_of(up, local).unwrap_or(false) {
+            println!("skipped {name}: local and remote have diverged");
+            continue;
+        }
+        let ok = if current.as_deref() == Some(l.head.as_str()) {
+            let dirty = git
+                .statuses(Some(git2::StatusOptions::new().include_untracked(true)))
+                .map(|s| !s.is_empty())
+                .unwrap_or(true);
+            if dirty {
+                println!("skipped {name}: the working tree has changes");
+                continue;
+            }
+            git_ok(&["merge", "--ff-only", "--quiet", &up.to_string()])
+        } else {
+            git_ok(&["branch", "--force", "--", &l.head, &up.to_string()])
+        };
+        if ok {
+            println!("updated {name}");
+        } else {
+            println!("skipped {name}: git refused to update it");
+        }
+    }
+}
+
+fn git_ok(args: &[&str]) -> bool {
+    std::process::Command::new("git")
+        .args(args)
+        .status()
+        .is_ok_and(|s| s.success())
 }
 
 /// Every open pull request of the repository, as stack layers (plain Forgejo API).
@@ -232,6 +312,7 @@ fn derive(prs: &[(Layer, bool)], current: i64) -> Option<Stack> {
         trunk: me.base.clone(),
         current,
         layers: vec![me.clone()],
+        truncated: false,
     };
     if !same_repo {
         return Some(alone());
@@ -284,6 +365,7 @@ fn derive(prs: &[(Layer, bool)], current: i64) -> Option<Stack> {
         trunk: bottom.base.clone(),
         current,
         layers: out,
+        truncated: false,
     })
 }
 
@@ -291,7 +373,7 @@ fn format_stack(stack: &Stack) -> String {
     if stack.layers.len() < 2 {
         return format!("#{} is not part of a stack\n", stack.current);
     }
-    let mut out = format!("{}\n", stack.trunk);
+    let mut out = format!("{}\n", clean(&stack.trunk));
     for l in &stack.layers {
         let checks = match l.checks.as_str() {
             "" => "",
@@ -305,10 +387,10 @@ fn format_stack(stack: &Stack) -> String {
             "{}└ #{} {}{}{} ({}){}\n",
             "  ".repeat(l.depth),
             l.number,
-            l.title,
+            clean(&l.title),
             if l.draft { " [draft]" } else { "" },
             checks,
-            l.head,
+            clean(&l.head),
             if l.number == stack.current {
                 "  ← this pull request"
             } else {
@@ -316,46 +398,43 @@ fn format_stack(stack: &Stack) -> String {
             }
         );
     }
+    if stack.truncated {
+        out += "(stack too large or cyclic: only part of it is shown; sync and merge are unavailable)\n";
+    }
     out
 }
 
+/// The commit of `layer` that HEAD contains and how many commits HEAD is ahead of it: the
+/// server's head, or the local branch of that name when the layer was updated locally (or
+/// pushed again) after the current branch forked off it. Closest wins.
+fn contained(git: &git2::Repository, head: git2::Oid, layer: &Layer) -> Option<(git2::Oid, usize)> {
+    let local = git
+        .find_branch(&layer.head, git2::BranchType::Local)
+        .ok()
+        .and_then(|b| b.get().target());
+    git2::Oid::from_str(&layer.head_sha)
+        .ok()
+        .into_iter()
+        .chain(local)
+        .filter(|&oid| oid == head || git.graph_descendant_of(head, oid).unwrap_or(false))
+        .filter_map(|oid| git.graph_ahead_behind(head, oid).ok().map(|(a, _)| (oid, a)))
+        .min_by_key(|&(_, ahead)| ahead)
+}
+
 /// The open same-repo pull request the current branch builds on: the nearest one whose head
-/// commit HEAD contains.
+/// commit HEAD contains (fewest commits between it and HEAD, independent of the PR order).
 fn nearest_parent<'a>(
     git: &git2::Repository,
     head: git2::Oid,
     branch: &str,
     prs: &'a [(Layer, bool)],
 ) -> eyre::Result<Option<&'a Layer>> {
-    let mut candidates = Vec::new();
-    for (l, same_repo) in prs {
-        if !same_repo || l.head == branch {
-            continue;
-        }
-        // the server's head, or the local branch of that name when the layer was pushed
-        // again after the current branch forked off it
-        let local = git
-            .find_branch(&l.head, git2::BranchType::Local)
-            .ok()
-            .and_then(|b| b.get().target());
-        let contained = git2::Oid::from_str(&l.head_sha)
-            .ok()
-            .into_iter()
-            .chain(local)
-            .find(|&oid| oid == head || git.graph_descendant_of(head, oid).unwrap_or(false));
-        if let Some(oid) = contained {
-            candidates.push((l, oid));
-        }
-    }
-    // the nearest candidate contains every other candidate
-    let mut best: Option<(&Layer, git2::Oid)> = None;
-    for (l, oid) in candidates {
-        match best {
-            Some((_, b)) if !git.graph_descendant_of(oid, b).unwrap_or(false) => {}
-            _ => best = Some((l, oid)),
-        }
-    }
-    Ok(best.map(|(l, _)| l))
+    Ok(prs
+        .iter()
+        .filter(|(l, same_repo)| *same_repo && l.head != branch)
+        .filter_map(|(l, _)| contained(git, head, l).map(|(_, ahead)| (l, ahead)))
+        .min_by_key(|&(l, ahead)| (ahead, l.number))
+        .map(|(l, _)| l))
 }
 
 async fn push(
@@ -387,7 +466,15 @@ async fn push(
             .iter()
             .find(|(l, s)| *s && l.number == n)
             .map(|(l, _)| l)
-            .ok_or_else(|| eyre!("#{n} is not an open pull request in {}/{}", repo.owner(), repo.name()))?,
+            .ok_or_else(|| eyre!("#{n} is not an open pull request in {}/{}", repo.owner(), repo.name()))
+            .and_then(|l| {
+                eyre::ensure!(
+                    contained(&git, head.id(), l).is_some(),
+                    "{branch} doesn't contain the head of #{n} ({}); rebase it onto that branch first",
+                    clean(&l.head)
+                );
+                Ok(l)
+            })?,
         None => nearest_parent(&git, head.id(), &branch, &prs)?.ok_or_else(|| {
             eyre!("{branch} doesn't build on an open pull request; use `mast pr create`, or name the layer with --on")
         })?,
@@ -396,7 +483,9 @@ async fn push(
         bail!("{branch} has no commits on top of #{}", parent.number);
     }
 
+    let mut created_branch = false;
     if let Some(remote) = remote {
+        created_branch = !git_ok(&["ls-remote", "--exit-code", "--heads", remote, &branch]);
         let status = std::process::Command::new("git")
             .args(["push", "--set-upstream", remote, &branch])
             .status()?;
@@ -409,7 +498,7 @@ async fn push(
         Some(t) => t,
         None => head.summary().ok().flatten().unwrap_or(&branch).to_owned(),
     };
-    let pr = api
+    let created = api
         .repo_create_pull_request(
             repo.owner(),
             repo.name(),
@@ -425,13 +514,27 @@ async fn push(
                 title: Some(title),
             },
         )
-        .await?;
+        .await;
+    let pr = match created {
+        Ok(pr) => pr,
+        Err(e) => {
+            // only undo what this run did: a branch that was already on the remote stays
+            if let (true, Some(remote)) = (created_branch, remote) {
+                if git_ok(&["push", "--quiet", remote, "--delete", &branch]) {
+                    eprintln!("removed {branch} from {remote} again");
+                } else {
+                    eprintln!("could not remove {branch} from {remote}; delete it yourself");
+                }
+            }
+            return Err(e.into());
+        }
+    };
     println!(
         "#{} {} on top of #{} {}",
         pr.number.unwrap_or_default(),
         pr.html_url.map(|u| u.to_string()).unwrap_or_default(),
         parent.number,
-        parent.title
+        clean(&parent.title)
     );
     Ok(())
 }
@@ -575,7 +678,7 @@ impl<'a> Client<'a> {
         let message = value
             .and_then(|v| v["message"].as_str().map(str::to_owned))
             .unwrap_or_else(|| status.to_string());
-        Err(Error::Other(eyre!("{message}")))
+        Err(Error::Other(eyre!("{}", clean(&message))))
     }
 
     /// Runs a stack action with the head commits the stack shows right now, so that the
@@ -588,6 +691,9 @@ impl<'a> Client<'a> {
     ) -> eyre::Result<ActionResult> {
         let (_, v) = self.send(Method::GET, "", None).await?;
         let stack: Stack = serde_json::from_value(v)?;
+        if stack.truncated {
+            bail!("the stack is too large or has a cycle: sync and merge are not available for it");
+        }
         // a lone layer can still be synced: after a squash merge below it, that drops the old commits
         if need_stack && stack.layers.len() < 2 {
             bail!(
@@ -847,5 +953,61 @@ mod tests {
                 .number,
             4
         );
+    }
+
+    #[test]
+    fn terminal_escapes_are_stripped() {
+        let v = json!({"trunk": "main\u{1b}[2J", "current": 2, "layers": [
+            {"number": 1, "title": "A \u{1b}]52;c;cHduZWQ=\u{7}", "base": "main", "head": "a", "parent": 0, "depth": 0},
+            {"number": 2, "title": "B", "base": "a", "head": "b\u{1b}[8m", "parent": 1, "depth": 1}]});
+        let s: Stack = serde_json::from_value(v).unwrap();
+        let out = format_stack(&s);
+        assert!(!out.chars().any(|c| c.is_control() && c != '\n'), "{out:?}");
+    }
+
+    fn test_repo(name: &str) -> (std::path::PathBuf, git2::Repository) {
+        let dir = std::env::temp_dir().join(format!("mast-stack-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let git = git2::Repository::init(&dir).unwrap();
+        (dir, git)
+    }
+
+    fn commit(git: &git2::Repository, msg: &str, parent: Option<git2::Oid>) -> git2::Oid {
+        let sig = git2::Signature::now("t", "t@example.com").unwrap();
+        let tree = git.find_tree(git.index().unwrap().write_tree().unwrap()).unwrap();
+        let p: Vec<git2::Commit> = parent.map(|o| git.find_commit(o).unwrap()).into_iter().collect();
+        git.commit(None, &sig, &sig, msg, &tree, &p.iter().collect::<Vec<_>>()).unwrap()
+    }
+
+    fn layer(n: i64, head: &str, oid: git2::Oid) -> (Layer, bool) {
+        (
+            Layer { number: n, head: head.into(), base: "x".into(), head_sha: oid.to_string(), ..Default::default() },
+            true,
+        )
+    }
+
+    #[test]
+    fn amended_lower_layer_keeps_the_right_parent() {
+        let (dir, git) = test_repo("amend");
+        let m = commit(&git, "main", None);
+        let a = commit(&git, "a", Some(m));
+        let b = commit(&git, "b", Some(a));
+        let c = commit(&git, "c", Some(b));
+        // b was amended locally to b2 (not in c) and pushed; the server's head is b2, and a
+        // second PR listed first must not win by order
+        let b2 = commit(&git, "b2", Some(a));
+        git.branch("b", &git.find_commit(b2).unwrap(), true).unwrap();
+        let prs = [layer(1, "a", a), layer(2, "b", b2)];
+        assert_eq!(nearest_parent(&git, c, "c", &prs).unwrap().unwrap().number, 1);
+        // c still contains the old b, which the local branch b no longer is: the layer below
+        // is #1 until c is rebased; with the old head recorded on the server it stays #2
+        let prs = [layer(1, "a", a), layer(2, "b", b)];
+        assert_eq!(nearest_parent(&git, c, "c", &prs).unwrap().unwrap().number, 2);
+        let rev = [prs[1].clone(), prs[0].clone()];
+        assert_eq!(nearest_parent(&git, c, "c", &rev).unwrap().unwrap().number, 2);
+        // --on validation helper: c does not contain b2
+        assert!(contained(&git, c, &layer(2, "b", b2).0).is_none());
+        assert!(contained(&git, c, &layer(2, "b", b).0).is_some());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
