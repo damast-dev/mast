@@ -109,6 +109,10 @@ pub enum PrSubcommand {
         #[clap(help = h!("arg-pr-create-milestone"))]
         #[clap(long)]
         milestone: Option<String>,
+
+        /// Create the pull request as a draft (WIP: title prefix)
+        #[clap(long, conflicts_with = "web")] // DAMAST: draft pull requests
+        draft: bool,
     },
     #[clap(about = h!("cmd-pr-view"))]
     View {
@@ -221,6 +225,8 @@ pub enum PrSubcommand {
         #[clap(subcommand)]
         command: Option<ReviewCommand>,
     },
+    #[command(flatten)]
+    Damast(crate::damast::draft::DraftCommand), // DAMAST: pr ready / pr draft
     /// Show, extend, rebase or merge a stack of pull requests
     Stack(crate::damast::stack::StackCommand), // DAMAST: stacked pull requests
 }
@@ -468,6 +474,7 @@ impl PrCommand {
                 web,
                 agit,
                 milestone,
+                draft, // DAMAST:
             } => {
                 create_pr(
                     repo,
@@ -482,6 +489,7 @@ impl PrCommand {
                     agit,
                     milestone,
                     repo_info.remote_name(),
+                    draft, // DAMAST:
                 )
                 .await?
             }
@@ -687,6 +695,12 @@ impl PrCommand {
                     } => request_pr_review(repo, &api, id, reviewers, team_reviewers).await?,
                 }
             }
+            Damast(cmd) => {
+                // DAMAST: pr ready / pr draft
+                let (repo, id) =
+                    try_get_pr_number(repo, &api, cmd.pr().map(|pr| pr.number)).await?;
+                cmd.run(&repo, &api, id).await?
+            }
             Stack(cmd) => {
                 // DAMAST: stacked pull requests
                 let (repo, id) = if cmd.needs_pr() {
@@ -736,6 +750,7 @@ impl PrCommand {
             | Merge { pr, .. }
             | Browse { id: pr }
             | Review { id: pr, .. } => pr.as_ref().and_then(|x| x.repo.as_ref()),
+            Damast(cmd) => cmd.pr().and_then(|x| x.repo.as_ref()), // DAMAST:
             Stack(cmd) => cmd.pr().and_then(|x| x.repo.as_ref()), // DAMAST:
         }
     }
@@ -776,7 +791,7 @@ impl PrCommand {
                     "can't figure out what repo to access, try specifying with `{{owner}}/{{repo}}#{{pr}}`",
                 ),
             },
-            Stack(_) => eyre::eyre!(
+            Damast(_) | Stack(_) => eyre::eyre!(
                 "can't figure out what repo to access, try specifying with `{{owner}}/{{repo}}#{{pr}}`",
             ), // DAMAST:
         }
@@ -1307,6 +1322,7 @@ async fn create_pr(
     agit: bool,
     milestone: Option<String>,
     remote_name: Option<&str>,
+    draft: bool, // DAMAST:
 ) -> eyre::Result<()> {
     let mut repo_data = api.repo_get(repo.owner(), repo.name()).await?;
 
@@ -1521,6 +1537,7 @@ async fn create_pr(
                         ..base_opt
                     }
                 };
+                let opt = crate::damast::draft::mark_option(opt, draft); // DAMAST:
                 let pr = api
                     .repo_create_pull_request(&repo_owner, &repo_name, opt)
                     .await?;
@@ -1626,6 +1643,7 @@ async fn create_pr(
                         (title, body)
                     };
 
+                let title = crate::damast::draft::mark_if(title, draft); // DAMAST:
                 let mut push_options = git2::PushOptions::new();
 
                 let mut remote_callbacks = git2::RemoteCallbacks::new();

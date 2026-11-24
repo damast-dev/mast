@@ -11,13 +11,23 @@ On GitHub, `gh` is half the workflow. You open pull requests from the terminal, 
 
 `fj` already does a lot of this for Forgejo, and does it well. mast starts from `fj` and adds what Damast adds to Forgejo, so the command line knows about the same things the web UI does.
 
-**Right now, mast is mostly `fj` with a new name.** That is on purpose: it gives the fork a clean starting point that tracks `fj` from day one. What mast adds so far:
-
-- **Co-authors.** `mast pr view <pr> commits` lists every `Co-authored-by:` trailer as a `Co-author:` line under the author, and `--oneline` ends each line with "Jonas Berg and 2 others", like Damast's web UI. mast reads the trailers itself, so this works against plain Forgejo too.
-
-Damast commands come next, starting with repo-bound packages.
+mast started as `fj` with a new name, so the fork tracks `fj` from day one. Damast commands land on top, one feature at a time.
 
 ## What mast adds
+
+### Co-authors
+
+`mast pr view <pr> commits` lists every `Co-authored-by:` trailer as a `Co-author:` line under the author, and `--oneline` ends each line with "Jonas Berg and 2 others", like Damast's web UI. mast reads the trailers itself, so this works against plain Forgejo too.
+
+### Draft pull requests
+
+```sh
+mast pr create --draft "Rework the login page"   # opens it as a draft
+mast pr ready                                     # the PR for the current branch is ready for review
+mast pr draft 42                                  # back to draft
+```
+
+A draft is a pull request whose title starts with `WIP:`, which is how both Damast and Forgejo store drafts. So these commands work against plain Forgejo too, and `fj` users see the same drafts. On Damast, marking a draft ready also asks the code owners for review. mast writes `WIP:` and recognises `WIP:` and `[WIP]`. If your server is configured with other `WORK_IN_PROGRESS_PREFIXES`, `mast pr ready` and `mast pr draft` stop with a message and leave the title as it was.
 
 ### Stacked pull requests
 
