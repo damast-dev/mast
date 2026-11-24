@@ -27,7 +27,6 @@ mod wiki;
 
 mod localization;
 
-mod damast; // DAMAST: own code
 
 pub const USER_AGENT: &str = concat!(
     env!("CARGO_PKG_NAME"),
