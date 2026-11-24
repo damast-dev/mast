@@ -791,8 +791,7 @@ impl PrCommand {
                     "can't figure out what repo to access, try specifying with `{{owner}}/{{repo}}#{{pr}}`",
                 ),
             },
-            Damast(_) => eyre::eyre!(
-            Stack(_) => eyre::eyre!(
+            Damast(_) | Stack(_) => eyre::eyre!(
                 "can't figure out what repo to access, try specifying with `{{owner}}/{{repo}}#{{pr}}`",
             ), // DAMAST:
         }
