@@ -55,6 +55,7 @@ icu_time = "2.2.0"
 open = "5.3.2"
 rand = "0.10.0"
 regex = "1.12.2"
+reqwest = { version = "0.13.4", default-features = false } # DAMAST: Damast-only API routes
 semver = { version = "1.0.26", optional = true }
 serde = { version = "1.0.219", features = ["derive"] }
 serde-saphyr = "2.0.0"
@@ -84,3 +85,17 @@ fluent-syntax = "0.12.0"
 [profile.release]
 lto = true
 codegen-units = 1
+
+# DAMAST: Debian package, built by .github/workflows/release.yml (cargo deb)
+[package.metadata.deb]
+name = "mast"
+maintainer = "Damast <damast-dev@users.noreply.github.com>"
+copyright = "forgejo-cli and mast contributors"
+extended-description = "mast is the command line for Damast, a soft fork of forgejo-cli (fj). Same commands and config as fj."
+section = "vcs"
+depends = "" # static musl binary
+assets = [
+  ["target/release/mast", "usr/bin/", "755"],
+  ["LICENSE-APACHE", "usr/share/doc/mast/", "644"],
+  ["LICENSE-MIT", "usr/share/doc/mast/", "644"],
+]

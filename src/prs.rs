@@ -227,6 +227,8 @@ pub enum PrSubcommand {
     },
     #[command(flatten)]
     Damast(crate::damast::draft::DraftCommand), // DAMAST: pr ready / pr draft
+    /// Show, extend, rebase or merge a stack of pull requests
+    Stack(crate::damast::stack::StackCommand), // DAMAST: stacked pull requests
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -699,6 +701,26 @@ impl PrCommand {
                     try_get_pr_number(repo, &api, cmd.pr().map(|pr| pr.number)).await?;
                 cmd.run(&repo, &api, id).await?
             }
+            Stack(cmd) => {
+                // DAMAST: stacked pull requests
+                let (repo, id) = if cmd.needs_pr() {
+                    let (repo, id) =
+                        try_get_pr_number(repo, &api, cmd.pr().map(|pr| pr.number)).await?;
+                    (repo, Some(id))
+                } else {
+                    (repo.clone(), None)
+                };
+                let remote = repo_info.remote_name().map(str::to_owned);
+                cmd.run(
+                    keys,
+                    repo_info.host_url(),
+                    &api,
+                    &repo,
+                    id,
+                    remote.as_deref(),
+                )
+                .await?
+            }
         }
         Ok(())
     }
@@ -729,6 +751,7 @@ impl PrCommand {
             | Browse { id: pr }
             | Review { id: pr, .. } => pr.as_ref().and_then(|x| x.repo.as_ref()),
             Damast(cmd) => cmd.pr().and_then(|x| x.repo.as_ref()), // DAMAST:
+            Stack(cmd) => cmd.pr().and_then(|x| x.repo.as_ref()), // DAMAST:
         }
     }
 
@@ -769,6 +792,7 @@ impl PrCommand {
                 ),
             },
             Damast(_) => eyre::eyre!(
+            Stack(_) => eyre::eyre!(
                 "can't figure out what repo to access, try specifying with `{{owner}}/{{repo}}#{{pr}}`",
             ), // DAMAST:
         }
@@ -2101,8 +2125,11 @@ async fn view_pr_commits(
         let deletions = stats.deletions.unwrap_or_default();
 
         if oneline {
+            // DAMAST: co-authors
+            let damast =
+                crate::damast::coauthors::oneline_suffix(message, repo_commit.author.as_ref());
             println!(
-                "{yellow}{short_sha} {bright_green}+{additions:<additions_width$} {bright_red}-{deletions:<deletions_width$}{reset} {name}"
+                "{yellow}{short_sha} {bright_green}+{additions:<additions_width$} {bright_red}-{deletions:<deletions_width$}{reset} {name}{damast}"
             );
         } else {
             let author = repo_commit
@@ -2120,6 +2147,9 @@ async fn view_pr_commits(
                 "{yellow}commit {sha}{reset} ({bright_green}+{additions}{reset}, {bright_red}-{deletions}{reset})"
             );
             println!("Author: {author_name} <{author_email}>");
+            for co in crate::damast::coauthors::parse(message, author_email) {
+                println!("Co-author: {} <{}>", co.name, co.email); // DAMAST: co-authors
+            }
             print!("Date:   ");
             let format = time::macros::format_description!(
                 "[weekday repr:short] [month repr:short] [day] [hour repr:24]:[minute]:[second] [year] [offset_hour sign:mandatory][offset_minute]"

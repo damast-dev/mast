@@ -12,6 +12,8 @@ Must stay a drop-in replacement for fj. Docs and tasks live in Jira project **MA
 4. Code, comments and commit messages in English. Commits end with
    `Co-authored-by: Claude <noreply@anthropic.com>`.
 5. Existing tests stay green; new commands come with tests.
+6. **Server features come with their command.** When Damast ships a feature that makes sense on the command
+   line, mast gets the command in the same feature cycle; the Damast feature isn't complete without it.
 
 ## Upstream sync
 
